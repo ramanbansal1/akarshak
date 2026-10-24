@@ -46,11 +46,8 @@ def run_gemaps_batch(
     """Run Gemma-APS on a batch of examples using pipeline."""
     results = []
     print(examples)
-    for item in examples:
-        # Get the output column
-        text = item['output']
-        item_id = item['id']
-
+    ids, outputs = examples['id'], examples['output']
+    for text, item_id in zip(ids, outputs):
         # Format with <s></s> markers
         formatted_input = create_propositions_input(text)
         messages = [{'role': 'user', 'content': formatted_input}]
