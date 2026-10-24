@@ -63,8 +63,6 @@ def run_gemaps_batch(
             "id": item_id,
             "original_response": text,
             "extracted_propositions": propositions,
-            "model": item_model,
-            "labels": item_labels
         }
         results.append(result)
 
@@ -120,6 +118,7 @@ def main():
                 args.max_new_tokens
             )
             all_results.extend(results)
+            break
 
         # Save all results for this split
         output_path = Path(args.output_dir) / f"ragtruth_{split_name}_output.jsonl"
