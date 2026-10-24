@@ -58,7 +58,7 @@ def run_gemaps_batch(
     """Run Gemma-APS on a batch of examples using pipeline."""
     results = []
     ids, outputs = examples['id'], examples['output']
-    for text, item_id in zip(ids, outputs):
+    for item_id, text in zip(ids, outputs):
         # Format with <s></s> markers
         formatted_input = create_propositions_input(text)
         messages = [{'role': 'user', 'content': formatted_input}]
@@ -118,8 +118,6 @@ def main():
 
         for i in trange(0, total, batch_size):
             batch = examples[i:i+batch_size]
-            print(f"\nBatch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size}: {len(batch)} examples")
-
             results = run_gemaps_batch(
                 batch,
                 generator,
