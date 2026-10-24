@@ -45,6 +45,7 @@ def run_gemaps_batch(
 ):
     """Run Gemma-APS on a batch of examples using pipeline."""
     results = []
+    print(examples)
     for item in examples:
         # Get the output column
         text = item['output']
