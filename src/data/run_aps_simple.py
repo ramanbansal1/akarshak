@@ -45,7 +45,18 @@ def run_gemaps_batch(
 
     results = []
     for item in tqdm(examples, desc="Processing"):
-        text = item['response']
+        # Handle different dataset formats
+        if isinstance(item, str):
+            text = item
+            item_id = ""
+            item_model = ""
+            item_labels = []
+        else:
+            text = item.get('response', item.get('text', ''))
+            item_id = item.get('id', '')
+            item_model = item.get('model', '')
+            item_labels = item.get('labels', [])
+
         prompt = f"Extract atomic propositions from the following text:\n\n{text}\n\nPropositions:"
 
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
@@ -64,11 +75,11 @@ def run_gemaps_batch(
         propositions = generated_text[len(prompt):].strip()
 
         result = {
-            "id": item.get('id', ''),
+            "id": item_id,
             "original_response": text,
             "extracted_propositions": propositions,
-            "model": item.get('model', ''),
-            "labels": item.get('labels', [])
+            "model": item_model,
+            "labels": item_labels
         }
         results.append(result)
 
