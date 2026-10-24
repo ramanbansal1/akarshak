@@ -10,6 +10,7 @@ import nltk
 from pathlib import Path
 from datasets import load_dataset
 from transformers import pipeline
+import torch
 
 # Download NLTK data
 nltk.download('punkt', quiet=True)
