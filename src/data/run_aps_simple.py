@@ -77,11 +77,19 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./data/processed")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size for processing")
     parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--dry_run", action="store_true", help="Dry run without actual inference")
 
     args = parser.parse_args()
 
     # Load dataset
     ds = load_ragtruth()
+
+    if args.dry_run:
+        print("DRY RUN MODE - no actual inference")
+        print(f"Would process {len(ds['train'])} train examples and {len(ds['test'])} test examples")
+        print(f"Batch size: {args.batch_size}")
+        print(f"Model: {args.model}")
+        return
 
     # Load pipeline once
     print(f"Loading pipeline: {args.model}...")
