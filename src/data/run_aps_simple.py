@@ -1,142 +1,135 @@
 """
-Simple Gemma-APS Runner for RAGTruth from HuggingFace
+Fast Gemma-APS runner for RAGTruth (true batched generation).
 
-Uses pipeline API with NLTK sentence tokenization and <s></s> markers.
+- Real batched generate() with left padding
+- Length-sorted batches to minimise padding / straggler waste
+- Greedy decoding, KV cache, bf16 + SDPA
+- Incremental JSONL writes + resume support
 """
-
-import logging
-from transformers import logging as hf_logging
-
-# Mute Hugging Face specific logs/warnings
-hf_logging.set_verbosity_error()
-
-# (Optional) Mute standard Python warnings if the warning persists
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning) # or just "ignore"
-
 
 import json
 import argparse
-import nltk
+import warnings
 from pathlib import Path
-from datasets import load_dataset
-from transformers import pipeline
+
+import nltk
 import torch
-from tqdm import trange
+from datasets import load_dataset
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import logging as hf_logging
 
-# Download NLTK data
-nltk.download('punkt', quiet=True)
+hf_logging.set_verbosity_error()
+warnings.filterwarnings("ignore", category=UserWarning)
 
-start_marker = '<s>'
-end_marker = '</s>'
-separator = '\n'
+for pkg in ("punkt", "punkt_tab"):  # punkt_tab needed on newer NLTK
+    nltk.download(pkg, quiet=True)
+
+START, END, SEP = "<s>", "</s>", "\n"
 
 
 def create_propositions_input(text: str) -> str:
-    """Format text with <s></s> markers for Gemma-APS."""
-    input_sents = nltk.tokenize.sent_tokenize(text)
-    propositions_input = ''
-    for sent in input_sents:
-        propositions_input += f'{start_marker} ' + sent + f' {end_marker}{separator}'
-    propositions_input = propositions_input.strip(f'{separator}')
-    return propositions_input
+    sents = nltk.tokenize.sent_tokenize(text)
+    return SEP.join(f"{START} {s} {END}" for s in sents)
 
 
-def load_ragtruth():
-    """Load RAGTruth dataset from HuggingFace."""
-    print("Loading RAGTruth dataset from HuggingFace...")
-    ds = load_dataset("wandb/RAGTruth-processed")
-    print(f"✓ Loaded dataset with splits: {list(ds.keys())}")
-    return ds
+def build_prompt(tokenizer, text: str) -> str:
+    msgs = [{"role": "user", "content": create_propositions_input(text)}]
+    return tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
 
 
-def run_gemaps_batch(
-    examples,
-    generator,
-    max_new_tokens=256
-):
-    """Run Gemma-APS on a batch of examples using pipeline."""
-    results = []
-    ids, outputs = examples['id'], examples['output']
-    for item_id, text in zip(ids, outputs):
-        # Format with <s></s> markers
-        formatted_input = create_propositions_input(text)
-        messages = [{'role': 'user', 'content': formatted_input}]
+def load_done_ids(path: Path) -> set:
+    if not path.exists():
+        return set()
+    done = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                done.add(json.loads(line)["id"])
+            except Exception:
+                pass
+    return done
 
-        # Generate
-        output = generator(messages, return_full_text=False)[0]['generated_text']
-        propositions = output.strip()
 
-        result = {
-            "id": item_id,
-            "original_response": text,
-            "extracted_propositions": propositions,
-        }
-        results.append(result)
-
-    return results
+@torch.inference_mode()
+def generate_batch(model, tokenizer, prompts, max_new_tokens):
+    enc = tokenizer(
+        prompts, return_tensors="pt", padding=True,
+        add_special_tokens=False,  # chat template already adds <bos>
+    ).to(model.device)
+    out = model.generate(
+        **enc,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        use_cache=True,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    new_tokens = out[:, enc["input_ids"].shape[1]:]
+    return [t.strip() for t in tokenizer.batch_decode(new_tokens, skip_special_tokens=True)]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Simple Gemma-APS Runner")
-    parser.add_argument("--model", type=str, default="google/gemma-2b-aps-it")
-    parser.add_argument("--output_dir", type=str, default="./data/processed")
-    parser.add_argument("--batch_size", type=int, default=1, help="Batch size for processing")
-    parser.add_argument("--max_new_tokens", type=int, default=256)
-    parser.add_argument("--dry_run", action="store_true", help="Dry run without actual inference")
+    p = argparse.ArgumentParser()
+    p.add_argument("--model", default="google/gemma-2b-aps-it")
+    p.add_argument("--output_dir", default="./data/processed")
+    p.add_argument("--batch_size", type=int, default=32)
+    p.add_argument("--max_new_tokens", type=int, default=512)
+    p.add_argument("--limit", type=int, default=None, help="Only process first N examples per split")
+    p.add_argument("--splits", nargs="*", default=None)
+    p.add_argument("--dry_run", action="store_true")
+    args = p.parse_args()
 
-    args = parser.parse_args()
-
-    # Load dataset
-    ds = load_ragtruth()
+    ds = load_dataset("wandb/RAGTruth-processed")
+    splits = args.splits or list(ds.keys())
 
     if args.dry_run:
-        print("DRY RUN MODE - no actual inference")
-        print(f"Would process {len(ds['train'])} train examples and {len(ds['test'])} test examples")
-        print(f"Batch size: {args.batch_size}")
-        print(f"Model: {args.model}")
+        for s in splits:
+            print(s, len(ds[s]))
         return
 
-    # Load pipeline once
-    print(f"Loading pipeline: {args.model}...")
-    generator = pipeline('text-generation', args.model, device_map='auto', torch_dtype=torch.bfloat16)
-    print("✓ Pipeline loaded")
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    tokenizer.padding_side = "left"          # REQUIRED for batched decoder-only generation
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-    # Process each split
-    for split_name in ds.keys():
-        print(f"\n{'='*60}")
-        print(f"Processing split: {split_name}")
-        print(f"{'='*60}")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="sdpa",
+    ).eval()
 
-        examples = ds[split_name]
-        total = len(examples)
-        print(f"Total examples: {total}")
+    for split in splits:
+        data = ds[split]
+        ids, texts = data["id"], data["output"]
+        if args.limit:
+            ids, texts = ids[:args.limit], texts[:args.limit]
 
-        # Process in batches
-        batch_size = args.batch_size
-        all_results = []
+        out_path = Path(args.output_dir) / f"ragtruth_{split}_output.jsonl"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        done = load_done_ids(out_path)
 
-        for i in trange(0, total, batch_size):
-            batch = examples[i:i+batch_size]
-            results = run_gemaps_batch(
-                batch,
-                generator,
-                args.max_new_tokens
-            )
-            all_results.extend(results)
-            break
+        items = [(i, t) for i, t in zip(ids, texts) if i not in done]
+        # Build prompts once, sort by token length (longest first -> OOM surfaces early)
+        prompts = [build_prompt(tokenizer, t) for _, t in items]
+        lengths = [len(tokenizer(pr, add_special_tokens=False)["input_ids"]) for pr in prompts]
+        order = sorted(range(len(items)), key=lambda k: -lengths[k])
 
-        # Save all results for this split
-        output_path = Path(args.output_dir) / f"ragtruth_{split_name}_output.jsonl"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for result in all_results:
-                f.write(json.dumps(result) + '\n')
-        print(f"✓ Saved {len(all_results)} results to {output_path}")
+        print(f"[{split}] {len(items)} to do ({len(done)} already done)")
 
-    print(f"\n{'='*60}")
-    print("✓ All splits processed!")
-    print(f"{'='*60}")
+        with open(out_path, "a", encoding="utf-8") as f:
+            for b in tqdm(range(0, len(order), args.batch_size), desc=split):
+                idx = order[b:b + args.batch_size]
+                outs = generate_batch(model, tokenizer, [prompts[k] for k in idx], args.max_new_tokens)
+                for k, props in zip(idx, outs):
+                    f.write(json.dumps({
+                        "id": items[k][0],
+                        "original_response": items[k][1],
+                        "extracted_propositions": props,
+                    }) + "\n")
+                f.flush()
+
+    print("✓ Done")
 
 
 if __name__ == "__main__":
