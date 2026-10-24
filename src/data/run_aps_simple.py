@@ -4,6 +4,17 @@ Simple Gemma-APS Runner for RAGTruth from HuggingFace
 Uses pipeline API with NLTK sentence tokenization and <s></s> markers.
 """
 
+import logging
+from transformers import logging as hf_logging
+
+# Mute Hugging Face specific logs/warnings
+hf_logging.set_verbosity_error()
+
+# (Optional) Mute standard Python warnings if the warning persists
+import warnings
+warnings.filterwarnings("ignore", category=UserGuideWarning) # or just "ignore"
+
+
 import json
 import argparse
 import nltk
@@ -45,7 +56,6 @@ def run_gemaps_batch(
 ):
     """Run Gemma-APS on a batch of examples using pipeline."""
     results = []
-    print(examples)
     ids, outputs = examples['id'], examples['output']
     for text, item_id in zip(ids, outputs):
         # Format with <s></s> markers
