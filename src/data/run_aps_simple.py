@@ -47,10 +47,8 @@ def run_gemaps_batch(
     results = []
     for item in examples:
         # Get the output column
-        text = item.get('output', item.get('response', item.get('text', '')))
-        item_id = item.get('id', '')
-        item_model = item.get('model', '')
-        item_labels = item.get('labels', [])
+        text = item['output']
+        item_id = item['id']
 
         # Format with <s></s> markers
         formatted_input = create_propositions_input(text)
