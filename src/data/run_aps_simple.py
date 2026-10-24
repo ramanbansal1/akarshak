@@ -22,6 +22,7 @@ from pathlib import Path
 from datasets import load_dataset
 from transformers import pipeline
 import torch
+from tqdm import trange
 
 # Download NLTK data
 nltk.download('punkt', quiet=True)
@@ -115,7 +116,7 @@ def main():
         batch_size = args.batch_size
         all_results = []
 
-        for i in range(0, total, batch_size):
+        for i in trange(0, total, batch_size):
             batch = examples[i:i+batch_size]
             print(f"\nBatch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size}: {len(batch)} examples")
 
