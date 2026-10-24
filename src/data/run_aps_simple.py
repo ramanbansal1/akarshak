@@ -23,26 +23,12 @@ def load_ragtruth():
 
 def run_gemaps_batch(
     examples,
-    model_name,
+    model,
+    tokenizer,
     device,
-    max_new_tokens=256,
-    output_path=None
+    max_new_tokens=256
 ):
-    """Run Gemma-APS on a batch of examples."""
-    print(f"Loading model: {model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None
-    )
-
-    if device == "cpu":
-        model = model.to(device)
-
-    model.eval()
-    print("✓ Model loaded")
-
+    """Run Gemma-APS on a batch of examples (model loaded externally)."""
     results = []
     for item in tqdm(examples, desc="Processing"):
         # Handle different dataset formats
@@ -67,7 +53,6 @@ def run_gemaps_batch(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
-                temperature=0.0,
                 pad_token_id=tokenizer.eos_token_id
             )
 
@@ -82,14 +67,6 @@ def run_gemaps_batch(
             "labels": item_labels
         }
         results.append(result)
-
-    if output_path:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for result in results:
-                f.write(json.dumps(result) + '\n')
-        print(f"✓ Saved {len(results)} results to {output_path}")
 
     return results
 
@@ -106,6 +83,21 @@ def main():
 
     # Load dataset
     ds = load_ragtruth()
+
+    # Load model ONCE (to avoid OOM)
+    print(f"Loading model: {args.model}...")
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        torch_dtype=torch.float16 if args.device == "cuda" else torch.float32,
+        device_map="auto" if args.device == "cuda" else None
+    )
+
+    if args.device == "cpu":
+        model = model.to(args.device)
+
+    model.eval()
+    print("✓ Model loaded (will be reused for all batches)")
 
     # Process each split
     for split_name in ds.keys():
@@ -127,7 +119,8 @@ def main():
 
             results = run_gemaps_batch(
                 batch,
-                args.model,
+                model,
+                tokenizer,
                 args.device,
                 args.max_new_tokens
             )
