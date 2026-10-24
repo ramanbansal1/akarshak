@@ -7,6 +7,7 @@ Loads dataset from wandb/RAGTruth-processed and runs Gemma-APS on all rows.
 import json
 import argparse
 from pathlib import Path
+# pyrefly: ignore[missing-import]
 from datasets import load_dataset
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -38,7 +39,7 @@ def run_gemaps_batch(
             item_model = ""
             item_labels = []
         else:
-            text = item.get('response', item.get('text', ''))
+            text = item.get('output', item.get('response', item.get('text', '')))
             item_id = item.get('id', '')
             item_model = item.get('model', '')
             item_labels = item.get('labels', [])
@@ -61,7 +62,7 @@ def run_gemaps_batch(
 
         result = {
             "id": item_id,
-            "original_response": text,
+            "original_output": text,
             "extracted_propositions": propositions,
             "model": item_model,
             "labels": item_labels
@@ -78,6 +79,8 @@ def main():
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size for processing")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--dry_run", action="store_true",
+                        help="Process only the first 100 examples per split for quick verification")
 
     args = parser.parse_args()
 
@@ -107,6 +110,10 @@ def main():
 
         examples = ds[split_name]
         total = len(examples)
+        if args.dry_run:
+            total = min(100, total)
+            examples = examples.select(range(total))
+            print(f"[DRY RUN] Limiting to first {total} examples")
         print(f"Total examples: {total}")
 
         # Process in batches
