@@ -12,7 +12,7 @@ hf_logging.set_verbosity_error()
 
 # (Optional) Mute standard Python warnings if the warning persists
 import warnings
-warnings.filterwarnings("ignore", category=UserGuideWarning) # or just "ignore"
+warnings.filterwarnings("ignore", category=UserWarning) # or just "ignore"
 
 
 import json
