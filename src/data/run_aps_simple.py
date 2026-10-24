@@ -1,17 +1,32 @@
 """
 Simple Gemma-APS Runner for RAGTruth from HuggingFace
 
-Loads dataset from wandb/RAGTruth-processed and runs Gemma-APS on all rows.
+Uses pipeline API with NLTK sentence tokenization and <s></s> markers.
 """
 
 import json
 import argparse
+import nltk
 from pathlib import Path
-# pyrefly: ignore[missing-import]
 from datasets import load_dataset
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from tqdm import tqdm
+from transformers import pipeline
+
+# Download NLTK data
+nltk.download('punkt', quiet=True)
+
+start_marker = '<s>'
+end_marker = '</s>'
+separator = '\n'
+
+
+def create_propositions_input(text: str) -> str:
+    """Format text with <s></s> markers for Gemma-APS."""
+    input_sents = nltk.tokenize.sent_tokenize(text)
+    propositions_input = ''
+    for sent in input_sents:
+        propositions_input += f'{start_marker} ' + sent + f' {end_marker}{separator}'
+    propositions_input = propositions_input.strip(f'{separator}')
+    return propositions_input
 
 
 def load_ragtruth():
@@ -24,45 +39,29 @@ def load_ragtruth():
 
 def run_gemaps_batch(
     examples,
-    model,
-    tokenizer,
-    device,
+    generator,
     max_new_tokens=256
 ):
-    """Run Gemma-APS on a batch of examples (model loaded externally)."""
+    """Run Gemma-APS on a batch of examples using pipeline."""
     results = []
-    for item in tqdm(examples, desc="Processing"):
-        # Handle different dataset formats
-        if isinstance(item, str):
-            text = item
-            item_id = ""
-            item_model = ""
-            item_labels = []
-        else:
-            text = item.get('output', item.get('response', item.get('text', '')))
-            item_id = item.get('id', '')
-            item_model = item.get('model', '')
-            item_labels = item.get('labels', [])
+    for item in examples:
+        # Get the output column
+        text = item.get('output', item.get('response', item.get('text', '')))
+        item_id = item.get('id', '')
+        item_model = item.get('model', '')
+        item_labels = item.get('labels', [])
 
-        prompt = f"Extract atomic propositions from the following text:\n\n{text}\n\nPropositions:"
+        # Format with <s></s> markers
+        formatted_input = create_propositions_input(text)
+        messages = [{'role': 'user', 'content': formatted_input}]
 
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        propositions = generated_text[len(prompt):].strip()
+        # Generate
+        output = generator(messages, return_full_text=False)[0]['generated_text']
+        propositions = output.strip()
 
         result = {
             "id": item_id,
-            "original_output": text,
+            "original_response": text,
             "extracted_propositions": propositions,
             "model": item_model,
             "labels": item_labels
@@ -77,30 +76,17 @@ def main():
     parser.add_argument("--model", type=str, default="google/gemma-2b-aps-it")
     parser.add_argument("--output_dir", type=str, default="./data/processed")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size for processing")
-    parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--max_new_tokens", type=int, default=256)
-    parser.add_argument("--dry_run", action="store_true",
-                        help="Process only the first 100 examples per split for quick verification")
 
     args = parser.parse_args()
 
     # Load dataset
     ds = load_ragtruth()
 
-    # Load model ONCE (to avoid OOM)
-    print(f"Loading model: {args.model}...")
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        torch_dtype=torch.float16 if args.device == "cuda" else torch.float32,
-        device_map="auto" if args.device == "cuda" else None
-    )
-
-    if args.device == "cpu":
-        model = model.to(args.device)
-
-    model.eval()
-    print("✓ Model loaded (will be reused for all batches)")
+    # Load pipeline once
+    print(f"Loading pipeline: {args.model}...")
+    generator = pipeline('text-generation', args.model, device_map='auto', torch_dtype=torch.bfloat16)
+    print("✓ Pipeline loaded")
 
     # Process each split
     for split_name in ds.keys():
@@ -110,10 +96,6 @@ def main():
 
         examples = ds[split_name]
         total = len(examples)
-        if args.dry_run:
-            total = min(100, total)
-            examples = examples.select(range(total))
-            print(f"[DRY RUN] Limiting to first {total} examples")
         print(f"Total examples: {total}")
 
         # Process in batches
@@ -126,9 +108,7 @@ def main():
 
             results = run_gemaps_batch(
                 batch,
-                model,
-                tokenizer,
-                args.device,
+                generator,
                 args.max_new_tokens
             )
             all_results.extend(results)
