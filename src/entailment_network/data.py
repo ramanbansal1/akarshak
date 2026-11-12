@@ -9,6 +9,7 @@ from pathlib import Path
 class DataCfg:
     claim_end: str = "<|claim_end|>"
     ev_end: str = "<|evidence_end|>"
+    verify_end: str = "<|im_end|>"   # global readout token; marks[0] -> hq slot
     max_claim_tokens: int = 128
     chunk_tokens: int = 128        # target tokens per evidence unit
     window_tokens: int = 6144      # evidence tokens per sequence (keep head+window < max_model_len)
@@ -18,7 +19,7 @@ class DataCfg:
 class Seq:
     row: int
     ids: list
-    marks: list        # [claim_end_pos, chunk_end_pos, ...]
+    marks: list        # [verify_end_pos, chunk_end_pos, ...]
     spans: list        # (sent_start, sent_end) per chunk, end exclusive
     pos: list          # chunk overlaps a supporting sentence (training only)
 
@@ -31,6 +32,7 @@ class RowEncoder:
         enc = lambda s: tokenizer(s, add_special_tokens=False)["input_ids"]
         self.enc = enc
         self.claim_end_ids, self.ev_end_ids, self.nl = enc(cfg.claim_end), enc(cfg.ev_end), enc("\n")
+        self.verify_end_ids = enc(cfg.verify_end)
         self.prefix = [tokenizer.bos_token_id] if tokenizer.bos_token_id is not None else []
 
     def encode_row(self, row: int, claim: str, sentences, supporting=frozenset()):
@@ -47,18 +49,22 @@ class RowEncoder:
         if cur:
             chunks.append((start, len(sent_ids), cur))
 
-        fresh = lambda: (list(head), [len(head) - 1], [], [])
-        ids, marks, spans, pos = fresh()
+        # each window ends with verify_end; marks[0] = its position (global state)
+        ids, cmarks, spans, pos = list(head), [], [], []
+
+        def finish():
+            ids.extend(self.verify_end_ids)
+            return Seq(row, list(ids), [len(ids) - 1] + cmarks, spans, pos)
+
         for a, b, toks in chunks:
             add = toks + self.ev_end_ids
-            if spans and len(ids) - len(head) + len(add) > c.window_tokens:
-                yield Seq(row, ids, marks, spans, pos)
-                ids, marks, spans, pos = fresh()
+            if spans and len(ids) - len(head) + len(add) + len(self.verify_end_ids) > c.window_tokens:
+                yield finish()
+                ids, cmarks, spans, pos = list(head), [], [], []
             ids += add
-            marks.append(len(ids) - 1); spans.append((a, b))
+            cmarks.append(len(ids) - 1); spans.append((a, b))
             pos.append(any(a <= i < b for i in supporting))
-        if spans:
-            yield Seq(row, ids, marks, spans, pos)
+        yield finish()
 
 
 def supporting_set(row) -> frozenset:

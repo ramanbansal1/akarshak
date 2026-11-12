@@ -14,13 +14,16 @@ starts. Each chunk is a contiguous sentence span `(a, b)`.
 **Sequence layout** per window:
 
 ```
-[BOS] claim_tokens[:128] <|claim_end|>  chunk₁ <|evidence_end|>  chunk₂ <|evidence_end|> ...
+[BOS] claim_tokens[:128] <|claim_end|>  chunk₁ <|evidence_end|>  ...  chunkₙ <|evidence_end|>  <|im_end|>
 ```
 
-- `marks[0]` = position of `<|claim_end|>` → claim state `hq`
+- `marks[0]` = position of `<|im_end|>` → **global state `g`**: with causal
+  attention it is the only position that has seen the claim AND every chunk,
+  so it fills the `hq` (claim-side) slot of the bilinear head — mode A
 - `marks[1:]` = positions of each `<|evidence_end|>` → chunk states `he`
+- `<|claim_end|>` is kept in the text for structure but its state is unused
 - Windows split when evidence tokens exceed `window_tokens` (6144); the head
-  (claim + marker) repeats per window.
+  (claim + marker) repeats per window, and each window gets its own `<|im_end|>`
 
 **Chunk label** (training): `y_i = row_label` if chunk span `(a,b)` overlaps any
 supporting sentence index, else `not_supported` (2). Supporting set = union over
@@ -28,11 +31,11 @@ annotator groups.
 
 ## 2. Hidden states (`pre_computing/hs_extract.py`)
 
-Backbone `f_θ` (granite-4.1-8b, frozen). For each sequence, collect the
-last-layer hidden state at each mark:
+Backbone `f_θ` (Qwen3.5-2B text decoder, frozen; was granite-4.1-8b). For each
+sequence, collect the last-layer hidden state at each mark:
 
 ```
-h_q   = f_θ(x)[marks[0]]    ∈ R^d     (claim state)
+h_q   = f_θ(x)[marks[0]]    ∈ R^d     (global state g: claim + all evidence)
 h_e,i = f_θ(x)[marks[i]]    ∈ R^d     (chunk i state)
 ```
 

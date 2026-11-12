@@ -1,9 +1,10 @@
 """HiddenStateExtractor: (ids, marks) stream -> per-sequence [M, L, d] tensors.
 
 For each input sequence, `marks` gives token positions whose hidden states are
-collected: marks[0] is the claim-end position, marks[1:] the evidence-chunk-end
-positions. Output row i is the hidden state at marks[i], for each cached layer:
-shape [len(marks), L, d]. Row 0 becomes the claim state (hq), rows 1: the chunk
+collected: marks[0] is the verify_end (global readout) position, marks[1:] the
+evidence-chunk-end positions. Output row i is the hidden state at marks[i],
+for each cached layer: shape [len(marks), L, d]. Row 0 becomes the claim-side
+state hq (global view: attends to claim + all evidence), rows 1: the chunk
 states (he) in save_cache.
 
 Backends:

@@ -13,7 +13,11 @@ milestone: `issues/prd.md`.
   `aggregator.py` (§2.3 math, numpy), `calibration.py` (τ̂_s/τ_r, ECE,
   risk-coverage), `controller.py` (3 actions).
 - `src/pre_computing/` — hidden-state extraction (`hs_extract.py`,
-  `HiddenStateExtractor`: vLLM `pooling_task="all"` + HF fallback).
+  `HiddenStateExtractor`: vLLM `pooling_task="all"` + HF fallback;
+  `extract.py`: phase-1 entrypoint → `feats_{split}.pt` caches).
+  Backbone: `Qwen/Qwen3.5-2B` text decoder (VLM wrapper unwrapped to
+  `language_model`); sequences end with `<|im_end|>` whose state fills
+  the `hq` slot (global view over claim + all evidence).
 - `src/claim_extractor/` — deferred modules behind flags (not in WICE path):
   `gemma_aps_adapter.py`, `edge_finder.py` (RRF+BM25+dense+rules),
   `granite_aps.py` (stub for future fine-tune), `atomic_claim_extractor.py`.
