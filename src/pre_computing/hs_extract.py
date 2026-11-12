@@ -79,8 +79,15 @@ class HiddenStateExtractor:
     def _init_hf(self):
         from transformers import AutoModel, AutoTokenizer
         self._tok = AutoTokenizer.from_pretrained(self.model_id)
-        self._hf = AutoModel.from_pretrained(self.model_id, torch_dtype=self.dtype,
-                                             device_map="auto" if torch.cuda.is_available() else None)
+        kw = dict(torch_dtype=self.dtype,
+                  device_map="auto" if torch.cuda.is_available() else None)
+        try:
+            m = AutoModel.from_pretrained(self.model_id, **kw)
+        except Exception:                                # VLMs may need the multimodal class
+            from transformers import AutoModelForImageTextToText
+            m = AutoModelForImageTextToText.from_pretrained(self.model_id, **kw)
+        base = getattr(m, "model", m)                     # ForConditionalGeneration -> base
+        self._hf = getattr(base, "language_model", base)  # VLM -> text decoder only
         self._hf.eval()
 
     def close(self):

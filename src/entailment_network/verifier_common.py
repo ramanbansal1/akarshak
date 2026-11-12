@@ -86,7 +86,9 @@ def tune_thresholds(s, y, grid=None):
 def default_layers(model_id: str):
     """Layers to cache: last hidden layer only (head design decision)."""
     from transformers import AutoConfig
-    n = AutoConfig.from_pretrained(model_id).num_hidden_layers
+    cfg = AutoConfig.from_pretrained(model_id)
+    tc = getattr(cfg, "text_config", cfg)                # VLMs nest the text config
+    n = getattr(tc, "num_hidden_layers", None) or cfg.num_hidden_layers
     return [n - 1]
 
 
