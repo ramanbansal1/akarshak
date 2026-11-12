@@ -37,6 +37,8 @@ def args():
     p.add_argument("--tp", type=int, default=1)
     p.add_argument("--shm_root", default="/dev/shm/hs_extract")
     p.add_argument("--backend", default="auto", choices=["auto", "vllm", "hf"])
+    p.add_argument("--hf_batch_tokens", type=int, default=65_536,
+                   help="HF backend: max tokens per forward batch (lower on small VRAM)")
     p.add_argument("--force", action="store_true", help="re-extract even if cache exists")
     p.add_argument("--limit", type=int, default=None, help="first N rows per split (smoke test)")
     p.add_argument("--out_dir", default="runs/wice")
@@ -66,7 +68,7 @@ def main():
     ext = HiddenStateExtractor(a.model, layers, a.max_model_len, gpu_mem=a.gpu_mem,
                                max_chunk_tokens=a.shm_tokens,
                                dtype=a.dtype, tp=a.tp, shm_root=a.shm_root,
-                               backend=a.backend)
+                               backend=a.backend, hf_batch_tokens=a.hf_batch_tokens)
     meta_cfg = dict(backbone=a.model, layers=layers, data_cfg=asdict(dcfg))
     try:
         for split in cp:
