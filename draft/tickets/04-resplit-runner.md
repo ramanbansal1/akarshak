@@ -14,8 +14,8 @@ can start immediately on labels alone
 **Status:** ready-for-agent
 
 - [x] Oracle-only mode runs today (extends oracle_feasibility.py to 1000 resplits)
-- [~] Real-score mode consumes eval_pipeline ClaimScore output
-- [~] Emits results/*.csv + summary table for paper T3/F2/F3
+- [ ] Real-score mode consumes eval_pipeline ClaimScore output
+- [x] Emits results/*.csv + summary table for paper T3/F2/F3
 - [x] Violation rate = fraction of resplits where test accepted-error > α
 
 Progress: experiments/resplit_runner.py implemented — modes
@@ -26,3 +26,10 @@ scipy.special.betaincinv (116ms -> 2.7ms/call; identical CP bounds).
 Oracle 1000-resplit run in progress -> results/oracle_resplit.csv.
 Real mode consumes eval_pipeline --scores_out npz (needs ticket 05).
 Tests: tests/test_resplit_runner.py (5 tests).
+
+Oracle DONE: results/oracle_resplit.csv (308 cells, 1000 resplits).
+Headline at alpha=0.20/grid50: macro certifies at ALL n_cal
+(100-500) with ~55.5% coverage ceiling (= correct-claim fraction) and
+0% violation; micro certifies only at n_cal=500 (bernstein) —
+confirms macro-FDP as practical primary. Violation rate 0.0 in all
+94 cells with cert_rate>0.5 (delta=0.10 sanity OK).
