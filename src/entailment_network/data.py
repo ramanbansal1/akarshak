@@ -115,6 +115,7 @@ def universal_row(r: dict) -> dict:
     """
     sents = [s["text"] for e in r.get("evidence", []) for s in e.get("sentences", [])]
     return {
+        "id": r.get("id", ""),
         "claim": r["claim"],
         "evidence": sents,
         "supporting_sentences": (r.get("claim_meta") or {}).get("supporting_sentences") or [],
