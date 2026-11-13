@@ -41,6 +41,9 @@ def args():
                    help="HF backend: max tokens per forward batch (lower on small VRAM)")
     p.add_argument("--force", action="store_true", help="re-extract even if cache exists")
     p.add_argument("--limit", type=int, default=None, help="first N rows per split (smoke test)")
+    p.add_argument("--splits", nargs="*", default=["train", "validation", "test"],
+                   choices=["train", "validation", "test"],
+                   help="subset of cache splits to (re)build")
     p.add_argument("--out_dir", default="runs/wice")
     return p.parse_args()
 
@@ -60,7 +63,9 @@ def main():
     a = args(); os.makedirs(a.out_dir, exist_ok=True)
     dcfg = DataCfg(a.claim_end, a.ev_end, chunk_tokens=a.chunk_tokens,
                   window_tokens=a.window_tokens)
-    cp = {s: f"{a.out_dir}/feats_{s}.pt" for s in ("train", "validation", "test")}
+    wanted = set(a.splits)
+    cp = {s: f"{a.out_dir}/feats_{s}.pt" for s in ("train", "validation", "test")
+          if s in wanted}
 
     from transformers import AutoTokenizer
     layers = a.layers or default_layers(a.model)
