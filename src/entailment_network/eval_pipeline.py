@@ -20,10 +20,13 @@ import torch
 
 from .aggregator import (ABSTAIN_ACTION, GAMMA, QUALIFY_ACTION,
                          SUPPORTED_ACTION, aggregate)
-from .calibration import (ece, risk_coverage, select_tau_refute,
+from .calibration import (ece, risk_coverage, select_tau_hoeffding,
+                          select_tau_rcps, select_tau_refute,
                           select_tau_support)
+from .claimscore import record_from_row, to_instance_arrays, write_npz
 from .controller import decide
 from .infer import Verifier
+from .splits import M_MAX
 from .verifier_common import LABELS, macro_f1, parse_label
 
 # controller action -> WICE label index (documented approximation:
@@ -39,9 +42,14 @@ def args():
     p.add_argument("--split", default="test", choices=["validation", "test"])
     p.add_argument("--calib_split", default="validation")
     p.add_argument("--alpha", type=float, default=0.10, help="accepted-error target")
+    p.add_argument("--delta", type=float, default=0.10,
+                   help="risk-control confidence: P(accepted-error > alpha) <= delta")
     p.add_argument("--beta", type=float, default=0.10, help="false-rejection target")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--out", default=None, help="optional jsonl of per-claim decisions")
+    p.add_argument("--scores_out", default=None,
+                   help="optional npz prefix: writes <prefix>.calib.npz and "
+                        "<prefix>.<split>.npz ClaimScore arrays")
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument("--tp", type=int, default=1)
     p.add_argument("--gpu_mem", type=float, default=0.85)
@@ -93,11 +101,14 @@ def _facet_mass(probs, col):
     return float(probs[:, col].mean()) if len(probs) else 0.0
 
 
-def calibrate(stats, alpha, beta):
+def calibrate(stats, alpha, beta, delta=0.10):
     """Two-step calibration on validation stats (k=1: claim = own facet).
 
     tau_r first (on refute mass R), then tau_s on eff with contradicted claims
     excluded — they can never reach SUPPORTED because coverage < 1.
+    tau_s uses select_tau_rcps: P(accepted-error > alpha) <= delta
+    (docs/risk_control.md); the empirical select_tau_support result is kept
+    for comparison.
     """
     eff = np.array([_facet_mass(s["probs"], 0) + GAMMA * _facet_mass(s["probs"], 1)
                     for s in stats])
@@ -108,8 +119,11 @@ def calibrate(stats, alpha, beta):
     refute = select_tau_refute(R, y == 2, beta)     # label 2 ~ not-supported proxy
     tau_r = refute["tau"]
     contradicted = (R >= tau_r) & (R > S)
-    sup = select_tau_support(eff[~contradicted], (y == 0)[~contradicted], alpha)
-    return dict(tau_s=sup["tau"], tau_r=tau_r, refute=refute, support=sup,
+    mask = ~contradicted
+    sup_emp = select_tau_support(eff[mask], (y == 0)[mask], alpha)
+    sup = select_tau_rcps(eff[mask], (y == 0)[mask], alpha=alpha, delta=delta)
+    return dict(tau_s=sup["tau"], tau_r=tau_r, refute=refute,
+                support=sup, support_empirical=sup_emp,
                 n_contradicted=int(contradicted.sum()))
 
 
@@ -159,6 +173,68 @@ def evaluate(stats, tau_s, tau_r, alpha):
     ), decisions
 
 
+def claim_records(stats, tau_s, tau_r):
+    """Per-claim ClaimScore records via the aggregator (k=1 WICE path).
+
+    u_j = support * 1{coverage == 1}; y_j strict (supported -> 1);
+    instance_id = WICE parent claim id. The same calibrated tau_s/tau_r
+    used for the controller actions define `established`/coverage here.
+    """
+    recs = []
+    for s in stats:
+        q = aggregate(s["probs"], np.zeros(len(s["probs"]), int), [0],
+                      tau_s=tau_s, tau_r=tau_r)
+        recs.append(record_from_row(s["row"], q, action=decide(q, tau_s).action))
+    return recs
+
+
+def _score_at_tau(scores, correct, tau):
+    """Apply a claim-score threshold: coverage + accepted-error on a split."""
+    scores, correct = np.asarray(scores), np.asarray(correct, dtype=bool)
+    acc = scores >= tau
+    n = int(acc.sum())
+    return dict(tau=float(tau), accepted=n,
+                coverage=float(acc.mean()) if len(scores) else 0.0,
+                error_rate=float((~correct[acc]).mean()) if n else None)
+
+
+def certified_block(calib_recs, test_recs, alpha, delta=0.10, m_max=None):
+    """Certified + baseline threshold selection on ClaimScore records.
+
+    Calibrates on `calib_recs` (instances = parent ids), applies each tau to
+    `test_recs`. Emits empirical + claim-level RCPS baselines and the four
+    select_tau_hoeffding variants (bound x mode) on the fixed grid — the
+    audit trail for the paper's certified-coverage results.
+    """
+    ca, ta = to_instance_arrays(calib_recs), to_instance_arrays(test_recs)
+    out = dict(alpha=alpha, delta=delta, m_max=m_max,
+               n_cal_instances=len(ca["instance_ids"]),
+               n_test_instances=len(ta["instance_ids"]),
+               n_cal_claims=len(calib_recs), n_test_claims=len(test_recs),
+               baselines={}, certified={})
+    for name, sel in (
+            ("empirical", lambda: select_tau_support(
+                ca["scores"], ca["correct"], alpha)),
+            ("rcps", lambda: select_tau_rcps(
+                ca["scores"], ca["correct"], alpha=alpha, delta=delta))):
+        s = sel()
+        out["baselines"][name] = dict(
+            calib={k: s[k] for k in ("tau", "accepted", "error_rate", "coverage")},
+            test=_score_at_tau(ta["scores"], ta["correct"], s["tau"]))
+    for bound in ("bernstein", "hoeffding"):
+        for mode in ("micro", "macro"):
+            s = select_tau_hoeffding(
+                ca["scores"], ca["correct"], ca["instances"],
+                alpha=alpha, delta=delta, grid=50, m_max=m_max,
+                bound=bound, mode=mode)
+            out["certified"][f"{bound}_{mode}"] = dict(
+                calib={k: s[k] for k in ("tau", "accepted", "error_rate",
+                                         "coverage", "U", "Lbar", "n_instances")
+                       if k in s},
+                test=_score_at_tau(ta["scores"], ta["correct"], s["tau"]))
+    return out
+
+
 def main():
     a = args()
     verifier = Verifier(a.ckpt, dtype=a.dtype, tp=a.tp, gpu_mem=a.gpu_mem,
@@ -167,7 +243,7 @@ def main():
 
     calib_rows = load_rows(a.dataset, a.config, a.calib_split, a.limit)
     calib_stats = row_stats(verifier, calib_rows)
-    cal = calibrate(calib_stats, a.alpha, a.beta)
+    cal = calibrate(calib_stats, a.alpha, a.beta, a.delta)
     print("CALIBRATION", json.dumps({k: v for k, v in cal.items()
                                      if k in ("tau_s", "tau_r", "n_contradicted")},
                                     indent=2, default=str))
@@ -177,6 +253,17 @@ def main():
     rows = load_rows(a.dataset, a.config, a.split, a.limit)
     stats = row_stats(verifier, rows)
     metrics, decisions = evaluate(stats, cal["tau_s"], cal["tau_r"], a.alpha)
+
+    # certified claim-level acceptance: ClaimScore records grouped by parent
+    m_max = M_MAX if "wice" in a.dataset else None
+    calib_recs = claim_records(calib_stats, cal["tau_s"], cal["tau_r"])
+    test_recs = claim_records(stats, cal["tau_s"], cal["tau_r"])
+    metrics["certified"] = certified_block(calib_recs, test_recs, a.alpha,
+                                           a.delta, m_max)
+    if a.scores_out:
+        write_npz(calib_recs, f"{a.scores_out}.calib.npz")
+        write_npz(test_recs, f"{a.scores_out}.{a.split}.npz")
+
     print("METRICS", json.dumps(metrics, indent=2, default=str))
 
     if a.out:
