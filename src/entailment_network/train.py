@@ -29,19 +29,36 @@ def args():
     return p.parse_args()
 
 
+def tune_binary(s0, yb, grid=None):
+    """Best binary threshold on max-P(supported) vs (row_y == supported)."""
+    grid = grid if grid is not None else torch.linspace(0.05, 0.95, 19).tolist()
+    best = (-1.0, 0.5)
+    for t in grid:
+        f1, _ = macro_f1((s0 >= t).long(), yb, K=2)
+        if f1 > best[0]:
+            best = (f1, t)
+    return best                                             # (macro_f1, threshold)
+
+
 def evaluate(model, cache, dev, thr=None):
     probs = predict_cache(model, cache, dev)
     chunk_f1, _ = macro_f1(probs.argmax(-1), cache.y)
     s = row_scores(probs, cache.chunk_row, cache.n_rows)
     y = cache.extra["row_y"]
+    yb = (y == 0).long()                                     # WiCE binary eval: SUPPORTED vs rest
     if thr is None:
         _, ts, tp = tune_thresholds(s, y)
+        _, tb = tune_binary(s[:, 0], yb)
     else:
-        ts, tp = thr
+        ts, tp = thr[0], thr[1]
+        tb = thr[2] if len(thr) > 2 else 0.5
     pred = decide(s, ts, tp)
+    pred_b = (s[:, 0] >= tb).long()
     f1, per = macro_f1(pred, y)
+    bin_f1, _ = macro_f1(pred_b, yb, K=2)
     return dict(chunk_f1=chunk_f1, row_f1=f1, row_acc=(pred == y).float().mean().item(),
-                per_class=per, thr=(ts, tp))
+                per_class=per, thr=(ts, tp), bin_thr=tb,
+                bin_f1=bin_f1, bin_acc=(pred_b == yb).float().mean().item())
 
 
 def main():
@@ -73,7 +90,8 @@ def main():
     hist = open(hist_path, "a", newline="")
     wr = csv.writer(hist)
     if fresh:
-        wr.writerow(["epoch", "loss", "chunk_f1", "row_f1", "row_acc", "lr"])
+        wr.writerow(["epoch", "loss", "chunk_f1", "row_f1", "row_acc",
+                     "bin_f1", "bin_acc", "lr"])
 
     best = -1
     for ep in range(a.epochs):
@@ -89,23 +107,29 @@ def main():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step(); sched.step()
         m = evaluate(model, va, dev)
-        row = [ep, f"{loss.item():.6f}", f"{m['chunk_f1']:.6f}",
-               f"{m['row_f1']:.6f}", f"{m['row_acc']:.6f}",
-               f"{sched.get_last_lr()[0]:.3e}"]
-        wr.writerow(row); hist.flush()
+        wr.writerow([ep, f"{loss.item():.6f}", f"{m['chunk_f1']:.6f}",
+                     f"{m['row_f1']:.6f}", f"{m['row_acc']:.6f}",
+                     f"{m['bin_f1']:.6f}", f"{m['bin_acc']:.6f}",
+                     f"{sched.get_last_lr()[0]:.3e}"])
+        hist.flush()
         print(f"ep {ep:02d} loss {loss.item():.4f} | val chunk_f1 {m['chunk_f1']:.4f} "
-              f"row_f1 {m['row_f1']:.4f} row_acc {m['row_acc']:.4f} thr {m['thr']}")
+              f"row_f1 {m['row_f1']:.4f} row_acc {m['row_acc']:.4f} "
+              f"bin_f1 {m['bin_f1']:.4f} bin_acc {m['bin_acc']:.4f} thr {m['thr']}")
         wb_log(dict(epoch=ep, train_loss=loss.item(), chunk_f1=m["chunk_f1"],
-                    row_f1=m["row_f1"], row_acc=m["row_acc"], lr=sched.get_last_lr()[0]))
+                    row_f1=m["row_f1"], row_acc=m["row_acc"],
+                    bin_f1=m["bin_f1"], bin_acc=m["bin_acc"],
+                    lr=sched.get_last_lr()[0]))
         if m["row_f1"] > best:
             best = m["row_f1"]
             torch.save(dict(state_dict=model.state_dict(), model_cfg=dict(d=d, n_layers=L, K=3, r=a.r),
-                            labels=LABELS, thresholds=m["thr"], **tr.meta), f"{a.out_dir}/head.pt")
+                            labels=LABELS, thresholds=m["thr"], bin_threshold=m["bin_thr"],
+                            **tr.meta), f"{a.out_dir}/head.pt")
     hist.close()
 
     ck = torch.load(f"{a.out_dir}/head.pt"); model.load_state_dict(ck["state_dict"])
     if os.path.exists(cp["test"]):
-        m = evaluate(model, FeatureCache(cp["test"]), dev, thr=ck["thresholds"])
+        m = evaluate(model, FeatureCache(cp["test"]), dev,
+                     thr=(*ck["thresholds"], ck.get("bin_threshold", 0.5)))
         print("TEST", {k: (round(v, 4) if isinstance(v, float) else v) for k, v in m.items()})
         wb_log({f"test/{k}": v for k, v in m.items()
                 if isinstance(v, (int, float))})

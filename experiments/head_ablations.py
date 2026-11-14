@@ -125,7 +125,7 @@ def train_head(tr, va, model, a, dev):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
-            ep_loss += float(loss); nb += 1
+            ep_loss += float(loss.detach()); nb += 1
         m = _row_eval(model, va, dev)
         hist.append((ep, m["row_f1"], ep_loss / max(nb, 1)))
         if m["row_f1"] > best_f1:

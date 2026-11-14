@@ -18,6 +18,29 @@ def parse_label(x) -> int:
     return int(s) if s.isdigit() else _ALIAS[s]
 
 
+def wice_chunk_labels(spans, supporting, row_label: int) -> list[int]:
+    """WiCE App. E.2 partition-level labels for (chunk, claim) pairs.
+
+    spans: list of (a, b) sentence-index ranges, one per chunk.
+    supporting: set of supporting-sentence indices for the row.
+    row_label: parse_label of the row (0=supported, 1=partial, 2=not).
+
+    - chunk shares no supporting sentence      -> NOT_SUP (2)
+    - chunk contains ALL supporting sentences and row is SUPPORTED -> 0
+    - all other cases                          -> PARTIAL (1)
+    """
+    ys = []
+    for a, b in spans:
+        chunk = set(range(a, b))
+        if not (supporting & chunk):
+            ys.append(NOT_SUP)
+        elif row_label == 0 and supporting <= chunk:
+            ys.append(0)
+        else:
+            ys.append(1)
+    return ys
+
+
 # ----------------------------------------------------------------- feature cache (flat, chunk-level)
 def save_cache(path, states, labels, meta, extra=None):
     """states: list of [1+N, L, d]; labels: list of N-lists (or None)."""

@@ -12,9 +12,10 @@ from dataclasses import asdict
 
 import torch
 
-from src.entailment_network.data import DataCfg, RowEncoder, load_universal, stream
+from src.entailment_network.data import (DataCfg, RowEncoder, load_universal,
+                                         stream, supporting_set)
 from src.entailment_network.verifier_common import (
-    NOT_SUP, default_layers, parse_label, save_cache)
+    NOT_SUP, default_layers, parse_label, save_cache, wice_chunk_labels)
 from .hs_extract import HiddenStateExtractor
 
 
@@ -53,7 +54,15 @@ def build_cache(ext, enc, ds, path, meta_cfg):
     for st in ext.extract(stream(enc, ds, meta)):
         states.append(st)
     row_y = torch.tensor([parse_label(l) for l in ds["label"]])
-    labels = [[int(row_y[r]) if p else NOT_SUP for p in pos] for r, pos, _ in meta]
+    # WiCE App. E.2: partition labels from supporting-sentence coverage,
+    # not the row label (see wice_chunk_labels).
+    sup = []
+    for r in ds:
+        try:
+            sup.append(supporting_set(r))
+        except Exception:                                # noqa: BLE001 - no annotation -> empty
+            sup.append(frozenset())
+    labels = [wice_chunk_labels(m[2], sup[m[0]], int(row_y[m[0]])) for m in meta]
     seq_row = torch.tensor([m[0] for m in meta])
     save_cache(path, states, labels, meta_cfg, extra=dict(row_y=row_y, seq_row=seq_row))
     print(f"{path}: {len(ds)} rows, {len(states)} sequences, {sum(map(len, labels))} chunks")

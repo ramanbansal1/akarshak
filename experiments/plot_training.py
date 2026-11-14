@@ -33,7 +33,8 @@ import matplotlib.pyplot as plt
 COLORS = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9"]
 
 RUN_METRICS = [("loss", "train_loss"), ("row_f1", "val row macro-F1"),
-               ("chunk_f1", "val chunk macro-F1"), ("row_acc", "val row accuracy")]
+               ("chunk_f1", "val chunk macro-F1"), ("row_acc", "val row accuracy"),
+               ("bin_f1", "val binary macro-F1"), ("bin_acc", "val binary accuracy")]
 ABL_METRICS = [("train_loss", "train_loss"), ("val_row_f1", "val row macro-F1")]
 
 
