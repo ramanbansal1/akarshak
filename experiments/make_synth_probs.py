@@ -52,9 +52,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--name", default="wice_p1p2", choices=["wice_p1p2"])
+    ap.add_argument("--name", default="wice_p1p2", choices=["wice_p1p2", "wice"])
     ap.add_argument("--split", default="test",
-                    help="wice_p1p2 test.jsonl == the P2 tuning pool")
+                    help="pool split ('validation' maps to dev.jsonl)")
     a = ap.parse_args()
 
     rows = list(load_universal(a.name, a.split))

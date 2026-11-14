@@ -288,7 +288,11 @@ def main():
     a = ap.parse_args()
 
     if a.compare:
-        print(gate_summary(a.compare[0], a.compare[1]))
+        text = gate_summary(a.compare[0], a.compare[1])
+        print(text)
+        if a.out:
+            Path(a.out).write_text(text + "\n")
+            print(f"gate summary -> {a.out}")
         return
 
     arrays = {}
