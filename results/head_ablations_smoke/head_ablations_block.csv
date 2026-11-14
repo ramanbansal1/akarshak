@@ -1,0 +1,2 @@
+kind,size,d,n_params,val_row_f1,test_chunk_f1,test_row_f1,test_row_acc
+blockdiag,2,2048,12291,0.3578,0.3666,0.3573,0.5479

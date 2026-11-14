@@ -69,7 +69,7 @@ def test_mode_rank_and_centroid(tmp_path, monkeypatch):
     ha.mode_rank(ns, "cpu")
     ha.mode_centroid(ns, "cpu")
     rank_csv = (tmp_path / "out" / "head_ablations_rank.csv").read_text()
-    assert "r,n_params" in rank_csv or "r," in rank_csv
+    assert "kind,size" in rank_csv
     assert "8" in rank_csv and "16" in rank_csv
     cent_csv = (tmp_path / "out" / "head_ablations_centroid.csv").read_text()
     assert "row_f1" in cent_csv

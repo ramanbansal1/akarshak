@@ -4,6 +4,10 @@ Modes:
   rank     VerdictModel rank sweep r in --ranks on feats_{train,validation,
            test}.pt (P1-train fit, P1-val early stop, P2 test metrics).
            Answers: does the ~3M-param head earn its parameters?
+           Default ranks now include r=1 (~12k params) — the tiny-probe arm.
+  block    BlockDiagVerdictModel block-size sweep (--blocks) — block-diagonal
+           W_k per class, K*d*b+K params (b=1 ~6k, b=2 ~12k at d=2048).
+           Same train/eval path; the other ~10k-param arm.
   centroid nearest-centroid baseline in he last-layer space -> same
            chunk->row->decide path -> row macro-F1, directly comparable.
   lgbm     LightGBM on the 5 ClaimQuantities -> P(strict_y) as alternative
@@ -40,10 +44,13 @@ import torch.nn.functional as F
 from src.entailment_network.aggregator import aggregate
 from src.entailment_network.claimscore import ClaimScore, write_npz
 from src.entailment_network.eval_pipeline import calibrate
-from src.entailment_network.verifier_common import (FeatureCache,
+from src.entailment_network.verifier_common import (BlockDiagVerdictModel,
+                                                    FeatureCache,
                                                     VerdictModel,
-                                                    macro_f1, predict_cache,
-                                                    row_scores, tune_thresholds,
+                                                    macro_f1, n_head_params,
+                                                    predict_cache,
+                                                    row_scores,
+                                                    tune_thresholds,
                                                     decide as vdecide)
 
 QUANTITIES = ["support", "contradiction", "coverage", "conflict", "agreement"]
@@ -52,15 +59,19 @@ QUANTITIES = ["support", "contradiction", "coverage", "conflict", "agreement"]
 def args():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", default="all",
-                   choices=["rank", "centroid", "lgbm", "all"])
+                   choices=["rank", "block", "centroid", "lgbm", "all"])
     p.add_argument("--dir", default="runs/wice_p1p2",
                    help="dir with feats_{train,validation,test}.pt")
-    p.add_argument("--ranks", default="32,64,128,256,512")
+    p.add_argument("--ranks", default="1,2,4,8,16,32,64,128,256,512",
+                   help="low-rank r sweep; r=1 is the ~12k-param regime")
+    p.add_argument("--blocks", default="1,2,4,8,16",
+                   help="block-diag block-size sweep; b=2 is ~12k params")
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--bs", type=int, default=512)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--wd", type=float, default=0.01)
-    p.add_argument("--class_power", type=float, default=0.5)
+    p.add_argument("--class_power", type=float, default=1.0,
+                   help="matches the deployed recipe (kernel train cmd)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--probs_calib", default=None,
                    help="P2 probs npz for lgbm training/calibration")
@@ -85,12 +96,11 @@ def _row_eval(model, cache, dev, thr=None):
                 thr=(float(ts), float(tp)))
 
 
-def train_head(tr, va, r, a, dev):
+def train_head(tr, va, model, a, dev):
     """Same recipe as train.py main(): AdamW + cosine, early stop on val
     row_f1, returns (best_state, best_val_row_f1, history)."""
     torch.manual_seed(a.seed)
-    L, d = tr.hq.shape[1], tr.hq.shape[2]
-    model = VerdictModel(d, L, K=3, r=r).to(dev)
+    model = model.to(dev)
     cnt = torch.bincount(tr.y, minlength=3).float()
     w = (cnt.sum() / cnt.clamp(min=1)) ** a.class_power
     w = (w / w.mean()).to(dev)
@@ -127,20 +137,18 @@ def train_head(tr, va, r, a, dev):
     return model, best_f1, hist
 
 
-def n_params(r, d):
-    return 2 * 3 * d * r + 3          # U,V [K,d,r] + bias[K]
-
-
-def mode_rank(a, dev):
+def _sweep(a, dev, kind, sizes, make_model, csv_name):
+    """Shared rank/block sweep: train each size, eval val+test, log history."""
     tr, va = FeatureCache(f"{a.dir}/feats_train.pt"), \
         FeatureCache(f"{a.dir}/feats_validation.pt")
     te = FeatureCache(f"{a.dir}/feats_test.pt") if \
         Path(f"{a.dir}/feats_test.pt").exists() else None
+    d, L = tr.hq.shape[2], tr.hq.shape[1]
     rows, history = [], []
-    for r in [int(x) for x in a.ranks.split(",")]:
-        model, vf1, hist = train_head(tr, va, r, a, dev)
+    for s in sizes:
+        model, vf1, hist = train_head(tr, va, make_model(s, d, L), a, dev)
         vm = _row_eval(model, va, dev)
-        rec = dict(r=r, d=tr.hq.shape[2], n_params=n_params(r, tr.hq.shape[2]),
+        rec = dict(kind=kind, size=s, d=d, n_params=n_head_params(model),
                    val_row_f1=round(vf1, 4))
         if te is not None:
             tm = _row_eval(model, te, dev)
@@ -148,12 +156,31 @@ def mode_rank(a, dev):
                        test_row_f1=round(tm["row_f1"], 4),
                        test_row_acc=round(tm["row_acc"], 4))
         rows.append(rec)
-        history += [dict(r=r, epoch=ep, val_row_f1=round(vf1_, 4),
+        history += [dict(kind=kind, r=s, epoch=ep, val_row_f1=round(vf1_, 4),
                          train_loss=round(ls, 4))
                     for ep, vf1_, ls in hist]
-        print("rank", rec, flush=True)
-    _write_csv(rows, Path(a.out) / "head_ablations_rank.csv")
+        print(kind, rec, flush=True)
+    _write_csv(rows, Path(a.out) / csv_name)
+    return rows, history
+
+
+def mode_rank(a, dev):
+    sizes = [int(x) for x in a.ranks.split(",")]
+    rows, history = _sweep(
+        a, dev, "lowrank", sizes,
+        lambda r, d, L: VerdictModel(d, L, K=3, r=r),
+        "head_ablations_rank.csv")
     _write_csv(history, Path(a.out) / "head_ablations_history.csv")
+    return rows
+
+
+def mode_block(a, dev):
+    sizes = [int(x) for x in a.blocks.split(",")]
+    rows, history = _sweep(
+        a, dev, "blockdiag", sizes,
+        lambda b, d, L: BlockDiagVerdictModel(d, L, K=3, block=b),
+        "head_ablations_block.csv")
+    _write_csv(history, Path(a.out) / "head_ablations_block_history.csv")
     return rows
 
 
@@ -280,6 +307,8 @@ def main():
     dev = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
     if a.mode in ("rank", "all"):
         mode_rank(a, dev)
+    if a.mode in ("block", "all"):
+        mode_block(a, dev)
     if a.mode in ("centroid", "all"):
         mode_centroid(a, dev)
     if a.mode in ("lgbm", "all"):

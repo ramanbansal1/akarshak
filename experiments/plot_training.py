@@ -114,15 +114,21 @@ def plot_ablations(files, out, dpi):
         rows = load(f)
         if not rows or "val_row_f1" not in rows[0] or "r" not in rows[0]:
             continue
-        ranks = sorted({int(float(r["r"])) for r in rows})
-        by_r = {r: [x for x in rows if int(float(x["r"])) == r] for r in ranks}
+        # group by (kind, r) when a kind column exists (lowrank vs blockdiag)
+        keys = sorted({(r.get("kind", ""), r["r"]) for r in rows},
+                      key=lambda t: (t[0], float(t[1])))
+        by_r = {}
+        for kind, r in keys:
+            by_r[(kind, r)] = [x for x in rows
+                               if x.get("kind", "") == kind and x["r"] == r]
         for col, label in ABL_METRICS:
             fig, ax = plt.subplots(figsize=(5.5, 3.5))
-            for i, r in enumerate(ranks):
-                d = by_r[r]
+            for i, key in enumerate(keys):
+                kind, r = key
+                d = by_r[key]
+                tag = f"{kind}={r}" if kind else f"r={r}"
                 ax.plot(fnum(d, "epoch"), fnum(d, col), marker="o", ms=3,
-                        lw=1.4, color=COLORS[i % len(COLORS)],
-                        label=f"r={r}")
+                        lw=1.4, color=COLORS[i % len(COLORS)], label=tag)
             ax.set_xlabel("epoch")
             ax.set_ylabel(label)
             ax.grid(alpha=0.3)

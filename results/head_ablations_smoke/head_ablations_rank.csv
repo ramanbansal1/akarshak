@@ -1,0 +1,2 @@
+kind,size,d,n_params,val_row_f1,test_chunk_f1,test_row_f1,test_row_acc
+lowrank,1,2048,12291,0.4029,0.3829,0.3764,0.4358

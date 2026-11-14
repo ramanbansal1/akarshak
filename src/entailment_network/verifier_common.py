@@ -118,6 +118,36 @@ class VerdictModel(nn.Module):
         return z.permute(1, 2, 0) + self.bias               # [B, N, K]
 
 
+class BlockDiagVerdictModel(nn.Module):
+    """Block-diagonal bilinear claim-evidence scorer (~10k-param regime).
+
+    Same interface as VerdictModel. Per class k, W_k is block-diagonal with
+    block size b: d dims split into G=d/b blocks of b×b matrices, so
+    z_k(b_, n) = sum_g hq_bg^T W_k[g] he_bng. Trainable params = K*d*b + K
+    (b=1 -> ~6k, b=2 -> ~12k at d=2048, K=3) — the tiny-probe ablation arm.
+    """
+
+    def __init__(self, d: int, n_layers: int, K: int = 3, block: int = 2):
+        super().__init__()
+        assert d % block == 0, f"d={d} not divisible by block={block}"
+        self.d, self.n_layers, self.K, self.block = d, n_layers, K, block
+        self.G = d // block
+        scale = 1.0 / math.sqrt(d)
+        self.W = nn.Parameter(torch.randn(K, self.G, block, block) * scale)
+        self.bias = nn.Parameter(torch.zeros(K))
+
+    def forward(self, hq: torch.Tensor, he: torch.Tensor) -> torch.Tensor:
+        hq = hq[:, -1, :].view(-1, self.G, self.block)      # [B, G, b]
+        he = he[:, :, -1, :].view(-1, he.shape[1], self.G, self.block)
+        t = torch.einsum("bgi,kgij->kbgj", hq, self.W)       # [K, B, G, b]
+        z = torch.einsum("kbgj,bngj->kbn", t, he)            # [K, B, N]
+        return z.permute(1, 2, 0) + self.bias               # [B, N, K]
+
+
+def n_head_params(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters())
+
+
 def macro_f1(pred, y, K: int = 3):
     """pred, y: index tensors of any shape. Returns (mean_f1, {label: f1})."""
     pred, y = torch.as_tensor(pred).reshape(-1), torch.as_tensor(y).reshape(-1)
