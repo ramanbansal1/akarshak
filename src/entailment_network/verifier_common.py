@@ -18,23 +18,26 @@ def parse_label(x) -> int:
     return int(s) if s.isdigit() else _ALIAS[s]
 
 
-def wice_chunk_labels(spans, supporting, row_label: int) -> list[int]:
+def wice_chunk_labels(spans, supporting_sets, row_label: int) -> list[int]:
     """WiCE App. E.2 partition-level labels for (chunk, claim) pairs.
 
     spans: list of (a, b) sentence-index ranges, one per chunk.
-    supporting: set of supporting-sentence indices for the row.
+    supporting_sets: list of frozensets — one per annotator; WiCE states
+        every annotated set is independently valid, so a chunk is
+        SUPPORTED when it contains ALL sentences of ANY one set.
     row_label: parse_label of the row (0=supported, 1=partial, 2=not).
 
     - chunk shares no supporting sentence      -> NOT_SUP (2)
-    - chunk contains ALL supporting sentences and row is SUPPORTED -> 0
+    - chunk contains a complete supporting set and row is SUPPORTED -> 0
     - all other cases                          -> PARTIAL (1)
     """
+    union = frozenset().union(*supporting_sets) if supporting_sets else frozenset()
     ys = []
     for a, b in spans:
         chunk = set(range(a, b))
-        if not (supporting & chunk):
+        if not (union & chunk):
             ys.append(NOT_SUP)
-        elif row_label == 0 and supporting <= chunk:
+        elif row_label == 0 and any(s <= chunk for s in supporting_sets):
             ys.append(0)
         else:
             ys.append(1)

@@ -71,6 +71,11 @@ def supporting_set(row) -> frozenset:
     return frozenset(i for s in row["supporting_sentences"] for i in s)   # union over annotators
 
 
+def supporting_sets(row) -> list[frozenset]:
+    """Each annotator's supporting-sentence set (WiCE: every set is valid)."""
+    return [frozenset(s) for s in row.get("supporting_sentences") or []]
+
+
 def stream(enc: RowEncoder, ds, meta: list):
     """Lazy (ids, marks) stream for the extractor; per-sequence metadata is appended to `meta`."""
     for r, row in enumerate(ds):

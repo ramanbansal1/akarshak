@@ -1,0 +1,13 @@
+{
+  "id": "bansalraman/trace-rag-wice-v4",
+  "title": "trace-rag-wice-v4",
+  "code_file": "wice_run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": ["bansalraman/trace-rag-wice-data"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

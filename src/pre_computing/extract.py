@@ -13,7 +13,7 @@ from dataclasses import asdict
 import torch
 
 from src.entailment_network.data import (DataCfg, RowEncoder, load_universal,
-                                         stream, supporting_set)
+                                         stream, supporting_sets)
 from src.entailment_network.verifier_common import (
     NOT_SUP, default_layers, parse_label, save_cache, wice_chunk_labels)
 from .hs_extract import HiddenStateExtractor
@@ -59,9 +59,9 @@ def build_cache(ext, enc, ds, path, meta_cfg):
     sup = []
     for r in ds:
         try:
-            sup.append(supporting_set(r))
+            sup.append(supporting_sets(r))
         except Exception:                                # noqa: BLE001 - no annotation -> empty
-            sup.append(frozenset())
+            sup.append([])
     labels = [wice_chunk_labels(m[2], sup[m[0]], int(row_y[m[0]])) for m in meta]
     seq_row = torch.tensor([m[0] for m in meta])
     save_cache(path, states, labels, meta_cfg, extra=dict(row_y=row_y, seq_row=seq_row))
