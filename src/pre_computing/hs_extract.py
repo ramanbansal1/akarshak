@@ -99,6 +99,11 @@ class HiddenStateExtractor:
     # ------------------------------------------------------------------ main
     def extract(self, gen):
         """gen yields (ids: list[int], marks: list[int]). Yields [M, L, d] cpu tensors."""
+        try:
+            from tqdm import tqdm
+            pbar = tqdm(desc=f"extract[{self.backend}]", unit="seq", leave=True)
+        except Exception:                                # noqa: BLE001
+            pbar = None
         window, window_tokens = [], 0
         for item in gen:
             ids, marks = item
@@ -107,10 +112,18 @@ class HiddenStateExtractor:
             window_tokens += len(ids)
             full = len(window) >= _WINDOW or window_tokens >= self.hf_batch_tokens
             if full:
-                yield from self._extract_window(window)
+                for st in self._extract_window(window):
+                    if pbar is not None:
+                        pbar.update(1)
+                    yield st
                 window, window_tokens = [], 0
         if window:
-            yield from self._extract_window(window)
+            for st in self._extract_window(window):
+                if pbar is not None:
+                    pbar.update(1)
+                yield st
+        if pbar is not None:
+            pbar.close()
 
     def _extract_window(self, window):
         if self.backend == "vllm":

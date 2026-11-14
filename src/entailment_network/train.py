@@ -6,9 +6,15 @@ by `python -m src.pre_computing.extract` in --out_dir (feats_{split}.pt).
   python -m src.entailment_network.train --out_dir runs/wice
 """
 
-import argparse, math, os
+import argparse, csv, math, os
 import torch, torch.nn.functional as F
+from .runlog import finish as wb_finish, get_wandb, log as wb_log
 from .verifier_common import *
+
+try:
+    from tqdm import tqdm
+except Exception:                                    # noqa: BLE001
+    tqdm = None
 
 
 def args():
@@ -57,27 +63,53 @@ def main():
     M = len(tr.y); total = a.epochs * math.ceil(M / a.bs); warm = max(total // 20, 1)
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1, (s + 1) / warm) * 0.5 * (1 + math.cos(math.pi * min(s / total, 1))))
+    wb = get_wandb(name=f"head-{os.path.basename(a.out_dir.rstrip('/'))}",
+                   config=vars(a))
+    wb_log(dict(model_cfg=dict(d=d, n_layers=L, K=3, r=a.r),
+                chunks=int(len(tr.y)), rows=int(tr.n_rows)))
+
+    hist_path = f"{a.out_dir}/head_history.csv"
+    fresh = not os.path.exists(hist_path)
+    hist = open(hist_path, "a", newline="")
+    wr = csv.writer(hist)
+    if fresh:
+        wr.writerow(["epoch", "loss", "chunk_f1", "row_f1", "row_acc", "lr"])
+
     best = -1
     for ep in range(a.epochs):
         model.train(); perm = torch.randperm(M)
-        for i in range(0, M, a.bs):
+        steps = range(0, M, a.bs)
+        if tqdm is not None:
+            steps = tqdm(steps, desc=f"ep{ep:02d}", unit="batch",
+                         total=math.ceil(M / a.bs), leave=False)
+        for i in steps:
             hq, he, y = tr.batch(perm[i:i + a.bs])
             loss = F.cross_entropy(model(hq.to(dev), he.to(dev))[:, 0], y.to(dev), weight=w)
             opt.zero_grad(set_to_none=True); loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step(); sched.step()
         m = evaluate(model, va, dev)
+        row = [ep, f"{loss.item():.6f}", f"{m['chunk_f1']:.6f}",
+               f"{m['row_f1']:.6f}", f"{m['row_acc']:.6f}",
+               f"{sched.get_last_lr()[0]:.3e}"]
+        wr.writerow(row); hist.flush()
         print(f"ep {ep:02d} loss {loss.item():.4f} | val chunk_f1 {m['chunk_f1']:.4f} "
               f"row_f1 {m['row_f1']:.4f} row_acc {m['row_acc']:.4f} thr {m['thr']}")
+        wb_log(dict(epoch=ep, train_loss=loss.item(), chunk_f1=m["chunk_f1"],
+                    row_f1=m["row_f1"], row_acc=m["row_acc"], lr=sched.get_last_lr()[0]))
         if m["row_f1"] > best:
             best = m["row_f1"]
             torch.save(dict(state_dict=model.state_dict(), model_cfg=dict(d=d, n_layers=L, K=3, r=a.r),
                             labels=LABELS, thresholds=m["thr"], **tr.meta), f"{a.out_dir}/head.pt")
+    hist.close()
 
     ck = torch.load(f"{a.out_dir}/head.pt"); model.load_state_dict(ck["state_dict"])
     if os.path.exists(cp["test"]):
         m = evaluate(model, FeatureCache(cp["test"]), dev, thr=ck["thresholds"])
         print("TEST", {k: (round(v, 4) if isinstance(v, float) else v) for k, v in m.items()})
+        wb_log({f"test/{k}": v for k, v in m.items()
+                if isinstance(v, (int, float))})
+    wb_finish()
 
 
 if __name__ == "__main__":
