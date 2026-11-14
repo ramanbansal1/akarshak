@@ -37,3 +37,26 @@ only retrain if absent. Uses P1/P2 manifests from ticket 01.
   (Add-ons -> Secrets). Without it everything still works, file logs only.
 - Kernel currently at hf_batch_tokens=8192 + expandable_segments after a
   T4 OOM at 32768; next fallback is `--window_tokens 4096`.
+
+## Run v6 postmortem (resolved)
+
+- Extraction + training **succeeded**: all `feats_*.pt` caches and
+  `head.pt` downloaded locally to `/tmp/wice_out3` (kernel output zip was
+  truncated — `wice_pool/feats_test.pt` arrived 0 bytes and later files
+  were missing, but the p1p2 caches + head are intact).
+- ERROR cause: `experiments/scores_from_cache.py::_parse` split
+  `uni:wice_p1p2:test=...` on the first colon → `KeyError: 'wice_p1p2:test'`
+  in `_UNI_SPLIT`. Fixed (strip `uni:`, rsplit on last colon). Reproduced
+  locally, then verified end-to-end on the real caches.
+- Real P2 metrics from `head.pt` (r=256, 10 ep, class_power=0.5):
+  row macro-F1 0.386, acc 0.543; per-class F1 supported 0.65 /
+  partial 0.06 / not_supported 0.45. Chunk macro-F1 0.40.
+- CPU sweep on the real caches (`results/head_sweep_cpu.csv`):
+  class_power=1.0 is the only change that helps (test row-F1 0.389,
+  acc 0.581); 30 epochs overfits badly. Kernel train cmd now passes
+  `--class_power 1.0`.
+- `tau_s=tau_r=inf` on P2 calibration → all u_j=0 → honest
+  verifier-limited regime (ticket 08 gate analysis applies).
+- Real ClaimScore npz for the two p1p2 pools saved under
+  `results/scores/wice_p1p2_{validation,test}.npz` (degenerate u=0 —
+  kept as pipeline-verified artifacts, not usable for coverage claims).

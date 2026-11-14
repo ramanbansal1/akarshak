@@ -61,8 +61,11 @@ def args():
 
 
 def _parse(spec: str):
+    # specs look like "uni:wice_p1p2:test=<feats.pt>" — strip the uni: scheme
+    # prefix, then split dataset name from split on the LAST colon
     name_split, path = spec.split("=", 1)
-    name, split = name_split.split(":", 1)
+    ns = name_split[4:] if name_split.startswith("uni:") else name_split
+    name, split = ns.rsplit(":", 1)
     return name, split, path
 
 

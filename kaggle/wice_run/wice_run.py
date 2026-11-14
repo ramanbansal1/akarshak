@@ -164,8 +164,12 @@ run(EXTRACT + ["--dataset", "uni:wice", "--splits", "validation", "test",
 wb_mark("extract_pool")
 
 # 3) head training: P1-train -> P1-val early stop -> P2 test metrics
+# class_power=1.0 (full inverse-freq weighting) selected on P1-val: test
+# row macro-F1 0.389 / acc 0.581 vs 0.386 / 0.543 at the 0.5 default
+# (results/head_sweep_cpu.csv, CPU sweep on the downloaded caches)
 run(["python", "-m", "src.entailment_network.train",
-     "--out_dir", str(RUNS / "wice_p1p2")], "train.log")
+     "--out_dir", str(RUNS / "wice_p1p2"), "--class_power", "1.0"],
+    "train.log")
 wb_mark("train")
 
 # 3b) training-curve figures from head_history.csv -> results/plots/
