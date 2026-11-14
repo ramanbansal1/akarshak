@@ -1,0 +1,449 @@
+\documentclass{article}
+
+\usepackage{PRIMEarxiv}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsmath,amssymb,amsfonts} % math
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{fancyhdr}       % header
+\usepackage{graphicx}       % graphics
+\usepackage{multirow}       % tables
+\usepackage{algorithm}      % pseudocode
+\usepackage{algpseudocode}
+\graphicspath{{media/}}     % figures live under media/
+
+% Header
+\pagestyle{fancy}
+\thispagestyle{empty}
+\rhead{\textit{ }}
+\fancyhead[LO]{Running Title for Header}
+
+%% Title
+\title{Your Paper Title Here
+\thanks{\textit{\underline{Citation}}:
+\textbf{Authors. Title. Pages.... DOI:000000/11111.}}
+}
+
+\author{
+  Author1, Author2 \\
+  Affiliation \\
+  Univ \\
+  City\\
+  \texttt{\{Author1, Author2\}email@email} \\
+  \And
+  Author3 \\
+  Affiliation \\
+  Univ \\
+  City\\
+  \texttt{email@email} \\
+}
+
+\begin{document}
+\maketitle
+
+%% ------------------------------------------------------------------
+\begin{abstract}
+% 150--250 words. Structure: (1) context/problem, (2) gap in prior work,
+% (3) your approach in one sentence, (4) key quantitative results,
+% (5) implication or release of code/data.
+\textbf{[Placeholder]} Retrieval-augmented generation does not guarantee that every
+generated claim is supported by the retrieved evidence. We propose \ldots{}
+Our method achieves \ldots{} on \ldots{}, improving coverage by \ldots{} at a
+fixed error level $\alpha=\ldots$. Code and data are available at \ldots{}
+\end{abstract}
+
+\keywords{Retrieval-augmented generation \and Claim verification \and Risk control \and Conformal prediction \and Hallucination}
+
+%% ------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+% Paragraph 1: Motivation. Why RAG errors matter, why response-level judgments are insufficient.
+% Paragraph 2: Limitation of existing approaches (verifiers without guarantees, heuristic thresholds).
+% Paragraph 3: Your idea at a high level, and why it works.
+% Paragraph 4: Contributions (bullet list below).
+% Paragraph 5: Paper roadmap (optional, one sentence).
+
+\textbf{[Placeholder: motivation.]}
+
+\textbf{[Placeholder: limitations of existing work.]}
+
+\textbf{[Placeholder: overview of the proposed approach.]}
+
+Our contributions are as follows:
+\begin{itemize}
+  \item \textbf{[Contribution 1]}: formulation of \ldots{}
+  \item \textbf{[Contribution 2]}: a method that \ldots{}
+  \item \textbf{[Contribution 3]}: empirical evaluation on \ldots{} showing \ldots{}
+  \item \textbf{[Contribution 4]}: release of code, prompts, and calibration splits.
+\end{itemize}
+
+%% ------------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+% Organise by theme, not by paper. End each theme with how your work differs.
+
+\subsection{Retrieval-Augmented Generation and Faithfulness}
+\textbf{[Placeholder: benchmarks and detectors for hallucination in RAG, answer-level versus claim-level.]}
+\cite{niu2024ragtruth,akbar2024hallumeasure,bergeron2025halluguard,yu2026rt4chart,li2026march,wang2026freeguard}
+
+\subsection{Claim-Level Verification and Fact-Checking}
+\textbf{[Placeholder: atomic claim decomposition, verification datasets, NLI/alignment verifiers, evidence aggregation.]}
+Decomposition and factuality metrics~\cite{min2023factscore,wei2024longfact,song2024veriscore,hosseini2024aps,chen2022claimdecomp};
+datasets~\cite{thorne2018fever,aly2021feverous,schlichtkrull2023averitec,augenstein2019multifc,wadden2020scifact,kamoi2023wice};
+verifiers~\cite{zha2023alignscore,laban2022summac,fabbri2022qafacteval,tang2024minicheck};
+evidence aggregation and structured verification~\cite{zhou2019gear,liu2020kgat,wu2026dagfc,wang2026toe,xie2026lorefact}.
+
+\subsection{Conformal Prediction and Risk Control}
+\textbf{[Placeholder: conformal prediction, risk-controlling sets, learn-then-test, conformal factuality and abstention.]}
+Foundations~\cite{vovk2005algorithmic,bates2021rcps,angelopoulos2021ltt,angelopoulos2024crc};
+language models~\cite{quach2024clm,mohri2024conformal,cherian2024llmvalidity,abbasiyadkori2024conformalabstention,oehri2025unicr};
+evidence acquisition under a guarantee~\cite{xu2026bcea}.
+
+\subsection{Data-Efficient Verifier Distillation}
+\textbf{[Placeholder: training a small verifier from a larger teacher with few examples; keep only if the method trains or distills a verifier.]}
+\cite{hsieh2023distilling,li2025llkd,liu2025srd,wu2025ded,zhang2026skillaware,hamman2025cod}
+
+\subsection{Positioning}
+\textbf{[Placeholder: one paragraph stating precisely what is new relative to the above.]}
+
+%% ------------------------------------------------------------------
+\section{Problem Formulation}
+\label{sec:problem}
+
+Retrieval-augmented generation grounds answers in retrieved passages, but
+retrieval alone does not guarantee that every generated statement is
+supported. A single response routinely mixes supported facts, unsupported
+details, and contradictions, so response-level judgments conceal where the
+errors occur~\cite{min2023factscore,wei2024longfact,song2024veriscore,akbar2024hallumeasure,niu2024ragtruth}. We therefore work at the level
+of atomic claims and ask which claims of a generated answer can be delivered
+to the user while the error rate among the delivered claims is
+statistically controlled and as few supported claims as possible are withheld.
+
+\paragraph{Setup.}
+Let an \emph{instance} $a$ be one generated answer with its extracted claims
+$\mathcal{C}(a)=\{c_1,\dots,c_{m(a)}\}$ and retrieved evidence passages
+$\mathcal{P}(a)$, where $m(a)\le m_{\max}$ almost surely. A verification
+pipeline assigns each claim an acceptance score $u_j\in[0,1]$, aggregated from
+per-passage verdicts, and $y_j\in\{0,1\}$ indicates whether $c_j$ is supported
+by $\mathcal{P}(a)$. For a threshold $\tau$, the accepted set is
+$\mathcal{A}(\tau)=\{j: u_j\ge\tau\}$. Per instance define the accepted and
+false-accept counts $N_\tau(a)=|\mathcal{A}(\tau)\cap\mathcal{C}(a)|$ and
+$F_\tau(a)=|\{j\in\mathcal{A}(\tau):y_j=0\}|$. We define the
+\emph{conditional accepted-error} as the micro ratio of expectations and the
+\emph{coverage} as
+\begin{equation}
+\mathcal{R}(\tau)=
+\frac{\mathbb{E}\big[F_\tau(a)\big]}
+     {\mathbb{E}\big[N_\tau(a)\big]},
+\qquad
+\mathrm{cov}(\tau)=\mathbb{E}\!\left[\frac{N_\tau(a)}{m(a)}\right],
+\label{eq:risk}
+\end{equation}
+with $\mathcal{R}(\tau)=0$ when $\mathbb{E}[N_\tau]=0$. Note that $\mathcal{R}$
+is a ratio of expectations over instances (the population
+false-discovery proportion among accepted claims), not an expectation of
+per-answer ratios. For target level $\alpha$,
+$\mathbb{E}[F_\tau]\le\alpha\,\mathbb{E}[N_\tau]$ is equivalent to
+$\mathcal{R}(\tau)\le\alpha$, i.e.\ to $\mathbb{E}[L_\tau(a)]\le0$ for the
+per-instance loss
+\begin{equation}
+L_\tau(a)=F_\tau(a)-\alpha\,N_\tau(a),
+\qquad L_\tau(a)\in[-\alpha m_{\max},\,m_{\max}],
+\label{eq:linear}
+\end{equation}
+an interval of width $m_{\max}(1+\alpha)$.
+
+\paragraph{Objective.}
+Given $n$ calibration instances $\mathcal{D}_{\mathrm{cal}}$ drawn i.i.d.\
+from the test distribution, independent of the frozen scorer $u$, and a
+threshold grid $\mathcal{T}\subset(0,1]$ fixed in advance, choose a
+data-dependent threshold $\hat\tau=\hat\tau(\mathcal{D}_{\mathrm{cal}})$ such
+that
+\begin{equation}
+\Pr_{\mathcal{D}_{\mathrm{cal}}}\!\big(\mathcal{R}(\hat\tau)>\alpha\big)\le\delta,
+\qquad\text{while maximizing}\quad \mathrm{cov}(\hat\tau),
+\label{eq:objective}
+\end{equation}
+where $\alpha$ is the target error level and $\delta$ the tolerated
+probability of violating it. The probability is taken over the draw of the
+calibration set; the guarantee is therefore marginal over calibration
+draws and holds at the population level, not for any individual answer.
+Since $\mathrm{cov}(\tau)$ is non-increasing in $\tau$, the problem reduces to
+selecting the smallest threshold whose risk is certified to be at most
+$\alpha$ with confidence $1-\delta$ (cf.\ risk-controlling prediction
+sets and learn-then-test~\cite{bates2021rcps,angelopoulos2021ltt}).
+
+\paragraph{Assumptions and limits.}
+The guarantee requires exchangeability between calibration and test
+\emph{instances}; claims of one answer share passages and are correlated, so
+the instance --- not the claim --- is the i.i.d.\ unit, and dataset splits
+must respect the instance grouping (e.g.\ by answer, prompt, or parent
+claim). Coverage also depends on verifier quality: when $u$ separates
+supported from unsupported claims poorly, the certified threshold rises and
+coverage collapses (Section~\ref{sec:experiments}). The per-passage
+three-way verdicts and the claim-level aggregates that produce $u_j$
+belong to the method (Section~\ref{sec:method}) and are not part of the
+problem definition.
+
+\paragraph{Notation.}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$a,\ \mathcal{C}(a),\ \mathcal{P}(a)$ & instance, its claims, its passages \\
+$m(a),\ m_{\max}$ & claims per instance, their bound \\
+$u_j,\,y_j$ & acceptance score, support label \\
+$\tau,\,\mathcal{A}(\tau)$ & threshold, accepted set \\
+$N_\tau(a),\,F_\tau(a)$ & accepted, false-accepted claim counts \\
+$L_\tau(a)$ & per-instance loss (Eq.~\eqref{eq:linear}) \\
+$\mathcal{R}(\tau),\,\mathrm{cov}(\tau)$ & accepted-error, coverage \\
+$\alpha,\,\delta$ & target error, violation probability \\
+$\mathcal{D}_{\mathrm{cal}},\,\mathcal{T}$ & calibration split, fixed grid \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%% ------------------------------------------------------------------
+\input{method}
+%% ------------------------------------------------------------------
+\section{Experimental Setup}
+\label{sec:experiments}
+
+\subsection{Datasets}
+We evaluate on WICE~\cite{kamoi2023wice} (\texttt{subclaim} configuration),
+which provides claim--evidence pairs with three-way labels
+(\emph{supported}, \emph{partially\_supported}, \emph{not\_supported}).
+Following the protocol of Section~\ref{sec:problem}, the WICE
+\emph{train} parents are partitioned deterministically (seed 20240613,
+stratified by parent label mix) into four disjoint pools:
+\textbf{P1} (1{,}060 parents) trains the verifier head, with a 10\%
+internal fold (106 parents) for early stopping; \textbf{P2} (200 parents)
+is reserved exclusively for aggregator and decision-layer tuning;
+\textbf{P3}/\textbf{P4} are drawn from the pooled WICE \emph{dev+test}
+parents (707 parents, 1{,}907 subclaims) as calibration and test sets via
+1{,}000 parent-level random resplits. Parent claims are the i.i.d.\
+instance unit; subclaims of one parent are never split across
+calibration and test. We use strict binary labels: only \emph{supported}
+counts as correct ($y_j{=}1$); \emph{partially\_supported} and
+\emph{not\_supported} both count as errors, since WICE does not separate
+refutation from insufficient evidence. Each WICE row is a single facet
+($k{=}1$), so the ancestor gate is exercised only on clearly-labelled
+synthetic slices (Section~\ref{sec:ablation}); $m_{\max}{=}6$ is the
+verified structural cap on subclaims per parent.
+
+\subsection{Baselines}
+We compare against three reference points. (i)~\emph{Empirical threshold}:
+the smallest $\tau$ whose calibration accepted-error is at most $\alpha$,
+with no confidence correction. (ii)~\emph{Claim-level RCPS}: the
+risk-controlling prediction set selector of Bates et al.\ applied to
+per-claim scores. (iii)~\emph{Oracle}: $u_j{=}y_j$, the perfect scorer,
+which defines the feasibility floor --- cells where even the oracle
+cannot certify are \emph{n-limited} and say nothing about the verifier.
+Our certified selectors are the four variants of
+Section~\ref{sec:method}: {Bernstein, Hoeffding} $\times$ {micro, macro}
+accepted-loss modes on a fixed grid.
+
+\subsection{Metrics}
+The headline metrics are the certified quantities of
+Eq.~\eqref{eq:objective}: \emph{certification rate} (fraction of resplits
+admitting a certified $\hat\tau$), mean calibration and test coverage,
+\emph{violation rate} (fraction of resplits where held-out accepted-error
+exceeds $\alpha$; must stay $\le\delta$), and the coverage ratio to the
+oracle where both certify. Secondary metrics are row/chunk macro-F1 of
+the three-way controller, ECE of $u_j$, and risk--coverage curves.
+
+\subsection{Implementation Details}
+The verifier backbone is a frozen Qwen3.5-2B; per claim--evidence pair we
+cache last-layer hidden states and score them with a low-rank bilinear
+head ($r{=}256$, $\approx$3.1M parameters) trained on P1-train with
+P1-val early stopping. Aggregation thresholds ($\tau_s,\tau_r$) are
+calibrated on P2 only. Extraction and head training run on Kaggle
+(2$\times$T4, HF backend, fp16); all selection experiments are CPU.
+We sweep $n_{\mathrm{cal}}\in\{100,200,300,500\}$,
+$\alpha\in\{0.05,\dots,0.35\}$, $|\mathcal{T}|\in\{50,100\}$,
+$\delta{=}0.10$, over 1{,}000 parent-level resplits with fixed seed.
+
+%% ------------------------------------------------------------------
+\section{Results}
+\label{sec:results}
+
+\subsection{Oracle Feasibility Floor}
+Before any learned scores, we compute the oracle ($u_j{=}y_j$) over the
+full protocol: 1{,}000 parent-level resplits of the pooled dev+test
+parents, all $n_{\mathrm{cal}}$, $\alpha$, $|\mathcal{T}|$ cells, both
+bounds and both loss modes (results/\texttt{oracle\_resplit.csv}). This
+floor separates three regimes. \emph{Micro} accepted-loss is nearly
+vacuous: even a perfect scorer certifies only at
+$n_{\mathrm{cal}}{=}500$, $\alpha\gtrsim0.25$ (Bernstein) and almost
+never under Hoeffding, because the $m_{\max}(1{+}\alpha)$ loss width
+dominates the confidence radius at realistic calibration sizes.
+\emph{Macro} per-instance FDP certifies at every tested
+$n_{\mathrm{cal}}$ once $\alpha\gtrsim0.20$, at a coverage ceiling of
+$\approx$55.5\% --- the strictly-supported claim fraction, which no
+scorer can exceed. Violation rate is 0 in all certifying cells
+($\delta{=}0.10$ sanity check). Macro-FDP is therefore the practical
+primary mode; micro is retained as the conservative baseline.
+
+\subsection{Main Results}
+\textbf{[Pending real verifier scores --- Kaggle extraction/head run in
+progress. Table below is the target layout; numbers fill from
+results/real\_resplits.csv + results/gate\_*.txt only.]}
+
+\begin{table}[t]
+ \caption{\textbf{[Pending]} Certified coverage at $\alpha{=}0.20$,
+ $\delta{=}0.10$, grid $|\mathcal{T}|{=}50$ (mean over 1{,}000 resplits).
+ ``Cert'' = certification rate; ``Viol'' = violation rate.}
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Selector & Cert $\uparrow$ & Coverage $\uparrow$ & Viol $\downarrow$ & Cov/oracle \\
+    \midrule
+    Empirical        & -- & -- & -- & -- \\
+    RCPS (claim)     & -- & -- & -- & -- \\
+    Bernstein/macro  & -- & -- & -- & -- \\
+    Hoeffding/macro  & -- & -- & -- & -- \\
+    Bernstein/micro  & -- & -- & -- & -- \\
+    Hoeffding/micro  & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:main}
+\end{table}
+
+\subsection{Risk--Coverage Trade-off}
+\textbf{[Pending] Coverage--$\alpha$ frontier (F2) and
+$n_{\mathrm{cal}}\to$coverage (F3), exported by
+\texttt{experiments/export\_frontier.py} from the resplit CSVs; the
+oracle frontier is already computed (results/frontier\_oracle/).}
+
+\subsection{Robustness to Verifier Quality}
+\textbf{[Pending] The three-region gate (results/gate\_*.txt) classifies
+each cell as n-limited (oracle fails), verifier-limited (oracle
+certifies, ours does not), or both-certify (report coverage ratio).
+Synthetic-score sanity runs confirm all three regions appear.}
+
+\subsection{Generalization}
+\textbf{[Deferred] RAGTruth end-to-end evaluation is parked; the
+calibration-on-train / test-on-test protocol is specified in
+experiments\_plan.md for when it resumes.}
+
+%% ------------------------------------------------------------------
+\section{Ablation Studies}
+\label{sec:ablation}
+
+All aggregation ablations run on P2 only (the tuning pool); dev/test are
+never touched (enforced by a manifest guard in the runner). WICE rows
+are $k{=}1$ facets, so multi-facet and ancestor-gate slices use
+deterministic synthetic facet assignments and are labelled as such.
+
+\subsection{Aggregation Components}
+We sweep the partial-support discount
+$\gamma\in\{0,0.25,0.5,0.75,1.0\}$, the facet pooling rule
+(weakest-link geometric mean vs.\ arithmetic mean), the geomean floor
+$\varepsilon\in\{10^{-6},10^{-3},10^{-2}\}$, and $\tau_s,\tau_r$ within
+$\pm25\%$ of their P2-calibrated values --- 270 settings per facet
+configuration (experiments/aggregation\_ablations.py,
+results/ablation\_*.csv). Metrics: 3-class row macro-F1 of the
+controller and risk at fixed coverages $\{0.5,0.75,0.9\}$ on strict $y$.
+The ancestor gate (on/off) and $k{>}1$ facets are exercised only under
+the synthetic facet layout.
+
+\subsection{Verifier Choice and Size}
+On the cached hidden states (CPU) we sweep the head rank
+$r\in\{32,64,128,256,512\}$ with P1-val early stopping and P2 test
+metrics, and compare against a nearest-centroid baseline in the same
+feature space through the identical decision path
+(experiments/head\_ablations.py, results/head\_ablations\_*.csv). A
+middle-layer probe sweep is infeasible with the current caches, which
+store only the last hidden layer; it is deferred to a re-extraction.
+A LightGBM head on the five claim-level aggregates
+(support, contradiction, coverage, conflict, agreement) provides an
+alternative $u_j$, tuned with parent-level group CV inside P2.
+
+\subsection{Calibration Set Size}
+The $n_{\mathrm{cal}}$ sweep $\{100,200,300,500\}$ is part of the main
+resplit protocol; its certified-coverage curve is Figure~F3 and
+doubles as this ablation (results/frontier\_*/ncal.csv).
+
+\subsection{Bound Type and Grid Resolution}
+Bernstein vs.\ Hoeffding and micro vs.\ macro modes are crossed with
+$|\mathcal{T}|\in\{50,100\}$ inside the same resplit CSVs; the oracle
+floor (Section~\ref{sec:results}) identifies which cells are
+n-limited rather than verifier-limited.
+
+\begin{table}[t]
+ \caption{\textbf{[Pending]} Aggregation ablation on P2 (top settings by
+ row macro-F1; full 270-setting sweep in results/ablation\_*.csv).}
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Setting & macro-F1 $\uparrow$ & mean $u$ & risk@0.75 $\downarrow$ & synthetic \\
+    \midrule
+    Full method ($\gamma{=}0.5$, geomean) & -- & -- & -- & no \\
+    $\gamma{=}0$ & -- & -- & -- & no \\
+    $\gamma{=}1.0$ & -- & -- & -- & no \\
+    mean pooling & -- & -- & -- & no \\
+    $k{=}3$ facets + ancestor gate & -- & -- & -- & yes \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:ablation}
+\end{table}
+
+%% ------------------------------------------------------------------
+\section{Analysis and Discussion}
+\label{sec:analysis}
+% Error analysis, qualitative examples, failure cases.
+
+\subsection{Qualitative Examples}
+\textbf{[Placeholder: accepted vs.\ rejected claims with their evidence.]}
+
+\subsection{Failure Cases}
+\textbf{[Placeholder: where the guarantee holds but utility is poor; where exchangeability is violated.]}
+
+%% ------------------------------------------------------------------
+\section{Limitations}
+\label{sec:limitations}
+\textbf{[Placeholder: population-level (not per-instance) guarantee, dependence on exchangeability and label quality, cost of labelled calibration data, verifier quality dependence, domains not tested.]}
+
+%% ------------------------------------------------------------------
+\section{Broader Impact and Ethical Considerations}
+\label{sec:impact}
+\textbf{[Placeholder: risks of over-trusting a ``guaranteed'' output, misuse, annotator treatment, data licensing.]}
+
+%% ------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+\textbf{[Placeholder: restate the problem and approach, summarise key findings with numbers, state limitations briefly, and outline future work.]}
+
+\section*{Reproducibility Statement}
+\textbf{[Placeholder: code/data URL, seeds, compute budget, exact prompts and model versions.]}
+
+\section*{Acknowledgments}
+This work was supported in part by \ldots{}
+
+%% ------------------------------------------------------------------
+%Bibliography
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+%% ------------------------------------------------------------------
+\appendix
+
+\section{Proofs}
+\label{app:proofs}
+\textbf{[Placeholder: full proof of the guarantee.]}
+
+\section{Additional Experimental Details}
+\label{app:details}
+\textbf{[Placeholder: prompts, annotation guidelines, hyperparameters, compute.]}
+
+\section{Additional Results}
+\label{app:results}
+\textbf{[Placeholder: extra tables and plots.]}
+
+\end{document}

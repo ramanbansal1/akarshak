@@ -105,6 +105,7 @@ def train_head(tr, va, r, a, dev):
     for ep in range(a.epochs):
         model.train()
         perm = torch.randperm(M)
+        ep_loss, nb = 0.0, 0
         for i in range(0, M, a.bs):
             hq, he, y = tr.batch(perm[i:i + a.bs])
             loss = F.cross_entropy(model(hq.to(dev), he.to(dev))[:, 0],
@@ -114,8 +115,9 @@ def train_head(tr, va, r, a, dev):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
+            ep_loss += float(loss); nb += 1
         m = _row_eval(model, va, dev)
-        hist.append((ep, m["row_f1"]))
+        hist.append((ep, m["row_f1"], ep_loss / max(nb, 1)))
         if m["row_f1"] > best_f1:
             best_f1 = m["row_f1"]
             best_state = {k: v.detach().cpu().clone()
@@ -134,9 +136,9 @@ def mode_rank(a, dev):
         FeatureCache(f"{a.dir}/feats_validation.pt")
     te = FeatureCache(f"{a.dir}/feats_test.pt") if \
         Path(f"{a.dir}/feats_test.pt").exists() else None
-    rows = []
+    rows, history = [], []
     for r in [int(x) for x in a.ranks.split(",")]:
-        model, vf1, _ = train_head(tr, va, r, a, dev)
+        model, vf1, hist = train_head(tr, va, r, a, dev)
         vm = _row_eval(model, va, dev)
         rec = dict(r=r, d=tr.hq.shape[2], n_params=n_params(r, tr.hq.shape[2]),
                    val_row_f1=round(vf1, 4))
@@ -146,8 +148,12 @@ def mode_rank(a, dev):
                        test_row_f1=round(tm["row_f1"], 4),
                        test_row_acc=round(tm["row_acc"], 4))
         rows.append(rec)
+        history += [dict(r=r, epoch=ep, val_row_f1=round(vf1_, 4),
+                         train_loss=round(ls, 4))
+                    for ep, vf1_, ls in hist]
         print("rank", rec, flush=True)
     _write_csv(rows, Path(a.out) / "head_ablations_rank.csv")
+    _write_csv(history, Path(a.out) / "head_ablations_history.csv")
     return rows
 
 
