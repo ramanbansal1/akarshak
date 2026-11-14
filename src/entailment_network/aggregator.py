@@ -128,10 +128,19 @@ def facet_verdicts(stats: dict[int, FacetStats], tau_s: float, tau_r: float,
         stats[f].blocked_by = failed
 
 
-def claim_quantities(stats: dict[int, FacetStats], chunk_probs: np.ndarray) -> ClaimQuantities:
+def claim_quantities(stats: dict[int, FacetStats], chunk_probs: np.ndarray,
+                     pool: str = "geomean", eps: float = EPS) -> ClaimQuantities:
+    """pool='geomean' -> weakest-link support (§2.3); 'mean' -> arithmetic
+    mean of facet eff (ablation). eps floors the geomean."""
     q = ClaimQuantities(facets=list(stats.values()))
-    effs = np.array([max(st.eff, EPS) for st in stats.values()])
-    q.support = float(np.exp(np.mean(np.log(effs)))) if len(effs) else 0.0
+    effs = np.array([st.eff for st in stats.values()])
+    if pool == "geomean":
+        q.support = float(np.exp(np.mean(np.log(np.maximum(effs, eps))))) \
+            if len(effs) else 0.0
+    elif pool == "mean":
+        q.support = float(effs.mean()) if len(effs) else 0.0
+    else:
+        raise ValueError(f"unknown pool {pool!r}")
     q.contradiction = max((st.R for st in stats.values()), default=0.0)
     q.coverage = float(np.mean([st.established for st in stats.values()])) if stats else 0.0
     S_tot = float(np.mean([st.S for st in stats.values()])) if stats else 0.0
@@ -148,7 +157,8 @@ def claim_quantities(stats: dict[int, FacetStats], chunk_probs: np.ndarray) -> C
 
 
 def aggregate(chunk_probs, facet_of_chunk, facet_ids, edges=None,
-              weights=None, tau_s=0.5, tau_r=0.5, gamma=GAMMA):
+              weights=None, tau_s=0.5, tau_r=0.5, gamma=GAMMA,
+              pool="geomean", eps=EPS):
     """Full §2.3 pipeline for one claim. chunk_probs: [N,3] array-like."""
     p = np.asarray(chunk_probs, dtype=np.float64)
     if p.ndim == 1:
@@ -157,7 +167,7 @@ def aggregate(chunk_probs, facet_of_chunk, facet_ids, edges=None,
     foc = np.asarray(facet_of_chunk, dtype=int)
     stats = pool_facets(p, foc, list(facet_ids), weights, gamma)
     facet_verdicts(stats, tau_s, tau_r, edges)
-    return claim_quantities(stats, p)
+    return claim_quantities(stats, p, pool=pool, eps=eps)
 
 
 def decide_action(q: ClaimQuantities, tau_s: float) -> str:
