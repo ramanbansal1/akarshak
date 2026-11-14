@@ -14,8 +14,9 @@ cell. This is THE headline experiment.
       -> mechanism verified on synth fixture: results/real_resplit_synth.csv
          (308 cells, 50 resplits) + results/gate_synth.txt three-region gate
 - [x] results/real_resplits.csv + frontier data exported
-      -> runner emits per-cell CSV; frontier/F2/F3 figure export still TODO
-         at real-run time (data is all in the CSV)
+      -> experiments/export_frontier.py: resplit CSV -> frontier.csv (F2
+         coverage-vs-alpha) + ncal.csv (F3) + F2_*/F3_* PNGs (--figs);
+         verified on oracle_resplit.csv -> results/frontier_oracle/
 - [x] If coverage≈0 everywhere: pivot framing per decision gate, still report
 - [ ] REAL run: scores_from_cache npz (Kaggle) OR scores_from_probs npz
       (local, once dump_chunk_probs runs on downloaded caches)
