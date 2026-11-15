@@ -42,7 +42,7 @@ from peft import LoraConfig, get_peft_model
 
 # ---------------------------------------------------------------- data
 def load(split):
-    return load_dataset("facebook/anli", split)
+    return load_dataset("facebook/anli", "plain_text", split=split)
 
 def prompt(hyp, prem):
     return f"{hyp}<hypothesis-end> {prem}<premise-end> <answer>"
