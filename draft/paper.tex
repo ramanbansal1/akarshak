@@ -20,11 +20,13 @@
 % Header
 \pagestyle{fancy}
 \thispagestyle{empty}
-\rhead{\textit{ }}
-\fancyhead[LO]{Running Title for Header}
+\rhead{\textit{Certified Claim-Level Risk Control for RAG}}
+\fancyhead[LO]{Certified Claim-Level Risk Control for RAG}
 
 %% Title
-\title{Your Paper Title Here
+% CAVEAT: "TRACE-RAG" collides with two 2026 works; pending rename.
+% This title is descriptive and name-free until the rename is decided.
+\title{Certified Claim-Level Risk Control for Retrieval-Augmented Generation
 \thanks{\textit{\underline{Citation}}:
 \textbf{Authors. Title. Pages.... DOI:000000/11111.}}
 }
@@ -48,13 +50,30 @@
 
 %% ------------------------------------------------------------------
 \begin{abstract}
-% 150--250 words. Structure: (1) context/problem, (2) gap in prior work,
-% (3) your approach in one sentence, (4) key quantitative results,
-% (5) implication or release of code/data.
-\textbf{[Placeholder]} Retrieval-augmented generation does not guarantee that every
-generated claim is supported by the retrieved evidence. We propose \ldots{}
-Our method achieves \ldots{} on \ldots{}, improving coverage by \ldots{} at a
-fixed error level $\alpha=\ldots$. Code and data are available at \ldots{}
+Retrieval-augmented generation does not guarantee that every generated
+claim is supported by the retrieved evidence: a single response routinely
+mixes supported facts, unsupported additions, and contradictions, and
+response-level factuality scores conceal which individual claims fail.
+Existing claim-level verifiers emit verdicts without statistical
+guarantees, while conformal and risk-controlling methods for language
+models certify at the level of the whole response or the refusal
+decision --- not the error proportion among the claims actually
+delivered. We formulate claim-level acceptance as a risk-control
+problem: choose a threshold on a claim acceptance score so that the
+conditional accepted-error is at most $\alpha$ with probability at least
+$1-\delta$ over the calibration draw, while maximizing coverage. We
+instantiate it with a pipeline that decomposes a response into atomic
+claims, scores each claim--evidence-chunk pair with a low-rank bilinear
+probe over frozen backbone hidden states, aggregates per-chunk verdict
+masses into five interpretable claim-level quantities, and selects the
+threshold by an empirical-Bernstein bound on a held-out calibration
+split. On WICE we show that micro accepted-error certification is nearly
+vacuous at realistic calibration sizes while a macro per-answer
+false-discovery criterion certifies at every tested size once
+$\alpha\gtrsim0.20$, with a coverage ceiling set by the fraction of
+strictly supported claims; real-verifier coverage numbers are reported
+in Section~\ref{sec:results}. Code, caches, and calibration splits are
+released.
 \end{abstract}
 
 \keywords{Retrieval-augmented generation \and Claim verification \and Risk control \and Conformal prediction \and Hallucination}
@@ -68,49 +87,83 @@ fixed error level $\alpha=\ldots$. Code and data are available at \ldots{}
 % Paragraph 4: Contributions (bullet list below).
 % Paragraph 5: Paper roadmap (optional, one sentence).
 
-\textbf{[Placeholder: motivation.]}
+Retrieval-augmented generation (RAG) has become the default architecture
+for knowledge-intensive question answering, yet retrieval alone does not
+guarantee faithfulness: generated answers routinely contain atomic
+statements that the retrieved passages do not support, contradict, or
+only partially cover~\cite{min2023factscore,niu2024ragtruth}. The
+standard evaluation protocol scores a whole response or a span, which
+conflates supported and unsupported content and gives the user no way
+to know \emph{which} parts of an answer are trustworthy. Decomposing a
+response into atomic claims and verifying each one is now common
+practice~\cite{min2023factscore,wei2024longfact,akbar2024hallumeasure},
+but the resulting per-claim verdicts are almost always heuristic: a
+verifier emits a label, a threshold is tuned on validation data, and
+nothing bounds the fraction of false acceptances among the claims that
+are actually delivered.
 
-\textbf{[Placeholder: limitations of existing work.]}
+Two lines of work come closest to supplying a guarantee. Conformal and
+risk-controlling prediction methods give finite-sample, distribution-free
+certificates for a chosen decision~\cite{vovk2005algorithmic,bates2021rcps,
+angelopoulos2021ltt,angelopoulos2024crc}, and several recent systems apply
+them to language-model outputs~\cite{mohri2024conformal,
+abbasiyadkori2024conformalabstention,oehri2025unicr,quach2024clm}. Their
+unit of certification, however, is the response, the sampled set, or the
+abstention decision --- none controls the error proportion among
+\emph{individual claims} that pass the filter. On the verification side,
+discriminative and probing-based verifiers score claim--evidence pairs
+cheaply~\cite{zha2023alignscore,laban2022summac,tang2024minicheck,
+azaria2023internal}, and structured aggregators combine per-passage
+verdicts into claim-level quantities~\cite{zhou2019gear,liu2020kgat,
+wang2026freeguard}. What is missing is the seam between the two: a
+claim-level acceptance rule whose false-acceptance rate is certified,
+not tuned.
 
-\textbf{[Placeholder: overview of the proposed approach.]}
+We close this gap by treating claim acceptance as a risk-control
+problem. Given a frozen scorer $u_j\in[0,1]$ for each extracted claim,
+we select the smallest threshold $\hat\tau$ on a held-out calibration
+split such that the conditional accepted-error
+$\mathcal{R}(\hat\tau)=\mathbb{E}[F]/\mathbb{E}[N]$ is at most $\alpha$
+with probability at least $1-\delta$ over the calibration draw, while
+maximizing coverage. The guarantee is marginal over calibration draws,
+holds at the population level under exchangeability of calibration and
+test \emph{instances} (answers, not claims), and requires no assumption
+of independence between claims of one answer. We instantiate the scorer
+with a pipeline that decomposes a response into atomic claims, verifies
+each claim against evidence chunks with a low-rank bilinear probe over
+frozen backbone hidden states trained on WiCE partition labels, and
+aggregates per-chunk verdict masses into five interpretable
+claim-level quantities that expose \emph{why} a claim fails. The
+certified threshold turns abstention into an operating point with a
+statistical guarantee rather than a hyperparameter.
 
 Our contributions are as follows:
 \begin{itemize}
-  \item \textbf{[Contribution 1]}: formulation of \ldots{}
-  \item \textbf{[Contribution 2]}: a method that \ldots{}
-  \item \textbf{[Contribution 3]}: empirical evaluation on \ldots{} showing \ldots{}
-  \item \textbf{[Contribution 4]}: release of code, prompts, and calibration splits.
+  \item \textbf{Problem formulation}: the first claim-level
+  risk-control objective for RAG --- a conditional accepted-error
+  $\mathbb{E}[F_\tau]/\mathbb{E}[N_\tau]\le\alpha$ certified at level
+  $(\alpha,\delta)$ over the calibration draw, with the answer (not the
+  claim) as the i.i.d.\ sampling unit (Section~\ref{sec:problem}).
+  \item \textbf{Method}: a four-stage pipeline --- APS claim extraction,
+  frozen-backbone chunk verification with a low-rank bilinear probe,
+  facet-level evidence aggregation into five interpretable quantities,
+  and empirical-Bernstein threshold certification
+  (Section~\ref{sec:method}).
+  \item \textbf{Empirical study}: an oracle feasibility floor over
+  1{,}000 parent-level resplits showing that micro accepted-error
+  certification is nearly vacuous at realistic calibration sizes while
+  a macro per-answer FDP criterion certifies at every tested
+  $n_{\mathrm{cal}}$ once $\alpha\gtrsim0.20$; plus real-verifier
+  coverage results and a verifier-quality gate that separates
+  n-limited from verifier-limited regimes
+  (Section~\ref{sec:results}).
+  \item \textbf{Release}: code, feature caches, head checkpoints,
+  ClaimScore artifacts, and the resplit/calibration harness
+  (Section~\ref{sec:repro}).
 \end{itemize}
 
 %% ------------------------------------------------------------------
-\section{Related Work}
-\label{sec:related}
-% Organise by theme, not by paper. End each theme with how your work differs.
-
-\subsection{Retrieval-Augmented Generation and Faithfulness}
-\textbf{[Placeholder: benchmarks and detectors for hallucination in RAG, answer-level versus claim-level.]}
-\cite{niu2024ragtruth,akbar2024hallumeasure,bergeron2025halluguard,yu2026rt4chart,li2026march,wang2026freeguard}
-
-\subsection{Claim-Level Verification and Fact-Checking}
-\textbf{[Placeholder: atomic claim decomposition, verification datasets, NLI/alignment verifiers, evidence aggregation.]}
-Decomposition and factuality metrics~\cite{min2023factscore,wei2024longfact,song2024veriscore,hosseini2024aps,chen2022claimdecomp};
-datasets~\cite{thorne2018fever,aly2021feverous,schlichtkrull2023averitec,augenstein2019multifc,wadden2020scifact,kamoi2023wice};
-verifiers~\cite{zha2023alignscore,laban2022summac,fabbri2022qafacteval,tang2024minicheck};
-evidence aggregation and structured verification~\cite{zhou2019gear,liu2020kgat,wu2026dagfc,wang2026toe,xie2026lorefact}.
-
-\subsection{Conformal Prediction and Risk Control}
-\textbf{[Placeholder: conformal prediction, risk-controlling sets, learn-then-test, conformal factuality and abstention.]}
-Foundations~\cite{vovk2005algorithmic,bates2021rcps,angelopoulos2021ltt,angelopoulos2024crc};
-language models~\cite{quach2024clm,mohri2024conformal,cherian2024llmvalidity,abbasiyadkori2024conformalabstention,oehri2025unicr};
-evidence acquisition under a guarantee~\cite{xu2026bcea}.
-
-\subsection{Data-Efficient Verifier Distillation}
-\textbf{[Placeholder: training a small verifier from a larger teacher with few examples; keep only if the method trains or distills a verifier.]}
-\cite{hsieh2023distilling,li2025llkd,liu2025srd,wu2025ded,zhang2026skillaware,hamman2025cod}
-
-\subsection{Positioning}
-\textbf{[Placeholder: one paragraph stating precisely what is new relative to the above.]}
-
+\input{related_work}
 %% ------------------------------------------------------------------
 \section{Problem Formulation}
 \label{sec:problem}
@@ -259,15 +312,29 @@ oracle where both certify. Secondary metrics are row/chunk macro-F1 of
 the three-way controller, ECE of $u_j$, and risk--coverage curves.
 
 \subsection{Implementation Details}
-The verifier backbone is a frozen Qwen3.5-2B; per claim--evidence pair we
-cache last-layer hidden states and score them with a low-rank bilinear
-head ($r{=}256$, $\approx$3.1M parameters) trained on P1-train with
-P1-val early stopping. Aggregation thresholds ($\tau_s,\tau_r$) are
+The verifier backbone is a frozen Qwen3.5-2B (hidden size $d=2048$); we
+cache last-layer hidden states at the readout and chunk-terminator
+positions and score claim--chunk pairs with a rank-$r{=}256$ low-rank
+bilinear head ($\approx$3.1M parameters, $2Kdr{+}K$ at $K{=}3$ classes)
+trained on the P1-train split of WiCE subclaim rows with P1-val early
+stopping. Chunk labels follow the WiCE App.~E.2 partition rule: a chunk
+with no supporting-sentence overlap is \emph{not\_supported}; a chunk
+containing a complete annotator supporting set on a \emph{supported} row
+is \emph{supported}; all other cases are \emph{partially\_supported}
+(each annotated supporting set is independently valid). Training uses
+3-class cross-entropy with inverse-frequency class weights
+($\text{class\_power}{=}1.0$), 10 epochs, AdamW ($\mathrm{lr}{=}10^{-3}$,
+weight decay $0.01$, cosine schedule), batch size 512 on cached features
+(CPU/GPU agnostic). Aggregation thresholds ($\tau_s,\tau_r$) are
 calibrated on P2 only. Extraction and head training run on Kaggle
 (2$\times$T4, HF backend, fp16); all selection experiments are CPU.
 We sweep $n_{\mathrm{cal}}\in\{100,200,300,500\}$,
 $\alpha\in\{0.05,\dots,0.35\}$, $|\mathcal{T}|\in\{50,100\}$,
 $\delta{=}0.10$, over 1{,}000 parent-level resplits with fixed seed.
+A joint LoRA-plus-probe variant (Unsloth QLoRA, rank 16, block-diagonal
+probe, chunk-level CE only) is implemented in
+\texttt{experiments/lora\_joint.py} and reported as an ablation arm
+once its Kaggle run completes.
 
 %% ------------------------------------------------------------------
 \section{Results}
@@ -397,31 +464,176 @@ n-limited rather than verifier-limited.
 %% ------------------------------------------------------------------
 \section{Analysis and Discussion}
 \label{sec:analysis}
-% Error analysis, qualitative examples, failure cases.
+
+\subsection{Verifier Quality Is the Binding Constraint}
+The frozen-probe verifier is the weak link of the current pipeline, and
+the results make this precise rather than merely intuitive. On the P1/P2
+WiCE protocol the best checkpoint reaches binary
+SUPPORTED-vs-rest F1 $\approx0.54$ (tuned on P1-val) with three-class
+row macro-F1 below $0.4$, and the per-class breakdown shows the
+\emph{partially\_supported} class nearly collapsed (F1 $\approx0.08$)
+before the App.~E.2 label correction. Training diagnostics show the
+signature of a capacity bottleneck rather than a data or optimization
+failure: train loss falls by two orders of magnitude over 10 epochs
+while validation metrics peak at epoch~0 and degrade --- the probe
+memorizes chunk labels it cannot generalize from frozen features.
+This is exactly the regime the oracle feasibility floor is designed to
+isolate: cells where even $u_j{=}y_j$ cannot certify are
+\emph{n-limited}, while cells where the oracle certifies but the real
+scorer does not are \emph{verifier-limited} and quantify how much
+headroom backbone adaptation must recover.
+
+\subsection{Why the Chunk Labels Mattered}
+An earlier extraction labelled every chunk overlapping any supporting
+sentence with the row's label, which conflated partial coverage with
+full support and reduced the partial class to $\approx$1.4\% of chunks.
+Correcting to the WiCE App.~E.2 partition rule raised partial chunks
+$4\times$ and, under per-annotator-set semantics, doubled the
+\emph{supported} chunk count (722$\to$1{,}667 on P1-train). The corrected
+labels are necessary for faithful supervision but, as the v3 run shows,
+do not by themselves rescue a frozen-probe verifier --- the head still
+collapses after epoch~0. We report this as a negative result: correct
+partition-level supervision is required but not sufficient; backbone
+adaptation is the remaining lever, which motivates the joint
+LoRA-plus-probe arm (Section~\ref{sec:impl}).
+
+\subsection{What the Aggregator Buys}
+Even a weak verifier produces interpretable failure structure: the five
+quantities separate agree-yet-incomplete evidence (high agreement, low
+coverage) from ancestor-blocked facets (low coverage despite
+non-trivial support), which a scalar score cannot. On WiCE ($k{=}1$
+facets) these collapse to support$\times$coverage, so the aggregator's
+value is currently latent --- exercised only on grouped subclaim slices
+and synthetic facet layouts --- and becomes real only on multi-facet
+benchmarks (Section~\ref{sec:limitations}).
 
 \subsection{Qualitative Examples}
-\textbf{[Placeholder: accepted vs.\ rejected claims with their evidence.]}
+\textbf{[Pending] Accepted vs.\ rejected claims with their evidence
+and $q_j$ vectors, drawn from the P2 pool once the corrected-label
+run completes.]}
 
 \subsection{Failure Cases}
-\textbf{[Placeholder: where the guarantee holds but utility is poor; where exchangeability is violated.]}
+\textbf{[Pending] Catalog of (i)~certified-but-low-coverage regimes
+(small $n_{\mathrm{cal}}$, strict $\alpha$), (ii)~verifier-limited
+cells where the oracle certifies but the probe does not, and
+(iii)~exchangeability violations (e.g.\ topic drift between calibration
+and test parents).]}
 
 %% ------------------------------------------------------------------
 \section{Limitations}
 \label{sec:limitations}
-\textbf{[Placeholder: population-level (not per-instance) guarantee, dependence on exchangeability and label quality, cost of labelled calibration data, verifier quality dependence, domains not tested.]}
+
+\paragraph{Scope of the guarantee.}
+The certificate is marginal over calibration draws and holds at the
+population level under exchangeability of calibration and test
+\emph{instances}; it says nothing about any individual answer, and it
+covers only the extracted claims and their support labels --- extractor
+errors and label noise lie outside it. Coverage collapses when the
+verifier is weak: at the current probe quality the certified threshold
+rises until few or no claims pass, which is the honest outcome the
+framework is designed to produce rather than a bug.
+
+\paragraph{Verifier quality.}
+The dominant limitation is empirical: the frozen-backbone probe reaches
+only $\approx$0.54 binary F1 on WiCE, far below the fine-tuned T5-3B
+systems of the original benchmark (claim F1 $\approx$0.78). WiCE's
+\texttt{not\_supported} label conflates refutation with insufficient
+evidence, so our $n$ channel is a \emph{not-established} mass rather
+than a true insufficiency verdict; separating the two requires
+supervision WiCE does not provide (e.g.\ SciFact). Backbone adaptation
+(LoRA) is implemented but not yet validated at scale.
+
+\paragraph{Structure.}
+WiCE rows are $k{=}1$ facets, so the facet algebra, ancestor gate, and
+multi-facet aggregation are exercised only on grouped subclaim slices
+and synthetic layouts; real multi-facet structure needs a multi-hop
+benchmark (e.g.\ HoVer) not yet run. The backbone is causal, so a chunk
+state attends only to earlier chunks in its window --- per-chunk masses
+are not independent and the agreement semantics inherit this caveat.
+
+\paragraph{Compute and data.}
+Extraction of hidden-state caches is the expensive stage ($\approx$1h
+per split on 2$\times$T4); the joint LoRA trainer removes the cache but
+multiplies per-epoch cost by the backbone forward+backward. The
+calibration guarantee requires labelled calibration instances drawn
+from the deployment distribution; domain shift between calibration and
+test silently voids it.
 
 %% ------------------------------------------------------------------
 \section{Broader Impact and Ethical Considerations}
 \label{sec:impact}
-\textbf{[Placeholder: risks of over-trusting a ``guaranteed'' output, misuse, annotator treatment, data licensing.]}
+
+\paragraph{Intended use.}
+The system is a verification and abstention layer for RAG outputs: it
+marks which atomic claims are supported often enough to deliver under
+a stated error budget, and withholds or qualifies the rest. The
+intended beneficiary is the end user of a RAG system, who currently
+receives unverified text with no indication of which parts are
+evidence-backed.
+
+\paragraph{Risks.}
+A ``certified'' label can be over-trusted: the guarantee is
+population-level and marginal over calibration draws, not a per-answer
+promise, and it inherits the verifier's blind spots --- a systematically
+wrong verifier produces a confidently wrong certificate. Deployments
+must therefore report the achieved coverage alongside the certified
+level, since coverage is where verifier weakness shows up. The
+QUALIFY\_CONFLICT and ABSTAIN actions are conservative by design but
+are currently stubs for downstream retrieve/correct actions; until
+those are implemented, abstention means dropping content, which has its
+own utility cost. WiCE annotations were produced by crowdworkers;
+label noise in the support judgments propagates into both training and
+the correctness labels used for certification.
+
+\paragraph{Data and licensing.}
+WiCE is released for research use; ANLI is CC-BY-NC-4.0. The released
+artifacts (caches, checkpoints, ClaimScore NPZs) contain no user data
+beyond the public benchmarks.
 
 %% ------------------------------------------------------------------
 \section{Conclusion}
 \label{sec:conclusion}
-\textbf{[Placeholder: restate the problem and approach, summarise key findings with numbers, state limitations briefly, and outline future work.]}
+
+We formulated claim-level acceptance in RAG as a risk-control problem:
+certify that the error proportion among delivered claims is at most
+$\alpha$ with probability $1-\delta$, while maximizing coverage. The
+instantiation --- APS extraction, a frozen-backbone bilinear probe,
+five-quantity evidence aggregation, and an empirical-Bernstein
+threshold selector --- is fully implemented and evaluated on WiCE under
+a strict P1/P2/calibration/test protocol. The central empirical finding
+is two-sided. On the statistical side, the oracle feasibility floor
+shows that micro accepted-error certification is nearly vacuous at
+realistic calibration sizes, while a macro per-answer FDP criterion
+certifies at every tested $n_{\mathrm{cal}}$ once $\alpha\gtrsim0.20$
+with a coverage ceiling of $\approx$55.5\% set by the strictly-supported
+claim fraction. On the model side, the frozen-probe verifier is the
+binding constraint: correct WiCE App.~E.2 chunk supervision is
+necessary but not sufficient, and the probe overfits within one epoch,
+motivating backbone adaptation via joint LoRA training. The framework
+itself is sound --- when the verifier improves, certified coverage
+improves with it, and when it does not, the system abstains rather than
+deliver unsupported claims. Future work: validate the joint LoRA arm,
+extend to multi-facet benchmarks (HoVer), and add the retrieve/correct
+actions behind QUALIFY\_CONFLICT.
 
 \section*{Reproducibility Statement}
-\textbf{[Placeholder: code/data URL, seeds, compute budget, exact prompts and model versions.]}
+\label{sec:repro}
+All code is in the repository under
+\texttt{src/entailment\_network/}: extraction (\texttt{src/pre\_computing/extract.py}),
+verifier head training (\texttt{src/entailment\_network/train.py}),
+inference (\texttt{infer.py}), end-to-end evaluation
+(\texttt{eval\_pipeline.py}), aggregation and calibration
+(\texttt{aggregator.py}, \texttt{calibration.py},
+\texttt{controller.py}), and the experiment drivers under
+\texttt{experiments/}. The WICE run executes on Kaggle
+(\texttt{kaggle/wice\_run*/}) with seeds fixed (split seed 20240613,
+training seed 0) and 1{,}000 parent-level resplits for all
+certification numbers. Feature caches, head checkpoints, training
+histories, ClaimScore NPZs, and result CSVs are archived under
+\texttt{results/}; the CPU test suite (\texttt{pytest tests/}) covers
+the label rule, encoder, aggregator, calibration, and controller. Exact
+commands and the P1/P2/P3/P4 data protocol are documented in
+\texttt{AGENTS.md} and \texttt{experiments\_plan.md}.
 
 \section*{Acknowledgments}
 This work was supported in part by \ldots{}
@@ -436,14 +648,131 @@ This work was supported in part by \ldots{}
 
 \section{Proofs}
 \label{app:proofs}
-\textbf{[Placeholder: full proof of the guarantee.]}
+
+We give the full proof of Proposition~\ref{prop:cert}. Write
+$z_a(\tau)=(L_\tau(a)-L_{\min})/w\in[0,1]$ for the scaled per-instance
+loss, where $L_{\min}=-\alpha m_{\max}$ and $w=m_{\max}(1+\alpha)$, and
+let $\bar z(\tau)$, $\hat v(\tau)$ denote its empirical mean and sample
+variance over the $n$ calibration instances.
+
+\paragraph{Step 1: per-$\tau$ concentration.}
+For a fixed $\tau$, the variables $z_a(\tau)$ are i.i.d.\ in $[0,1]$
+because the instances are i.i.d.\ and $u$ is frozen before calibration.
+The empirical Bernstein inequality~\cite{maurer2009empirical} states
+that for any $\delta'>0$, with probability at least $1-\delta'$,
+\[
+\mathbb{E}[z_a(\tau)]
+\;\le\;\bar z(\tau)
++\sqrt{\frac{2\,\hat v(\tau)\,\ln(2/\delta')}{n}}
++\frac{7\ln(2/\delta')}{3(n-1)} .
+\]
+Multiplying through by $w$ and adding back $L_{\min}$ gives, on the same
+event,
+\[
+\mathbb{E}[L_\tau(a)]
+\;\le\;\bar L(\tau)+w\,r(\tau)\Big|_{\delta'}
+\;=\;U_{\delta'}(\tau),
+\]
+where $r(\tau)$ is the radius of Eq.~\eqref{eq:bernstein} evaluated at
+confidence $\delta'$.
+
+\paragraph{Step 2: uniform bound over the grid.}
+The grid $\mathcal{T}$ is fixed in advance and independent of the
+calibration data, so we may apply Step~1 to each $\tau\in\mathcal{T}$
+with $\delta'=\delta/|\mathcal{T}|$ and take a union bound. With
+probability at least $1-\delta$, simultaneously for all
+$\tau\in\mathcal{T}$,
+\[
+\mathbb{E}[L_\tau(a)]\;\le\;U(\tau),
+\qquad\text{i.e.}\qquad
+\Pr\Big(\exists\,\tau\in\mathcal{T}:\mathbb{E}[L_\tau]>U(\tau)\Big)\le\delta .
+\tag{$\ast$}
+\]
+
+\paragraph{Step 3: the selected threshold is covered.}
+On the event $(\ast)$, if $\hat\tau=\min\{\tau:U(\tau)\le0\}$ exists then
+$U(\hat\tau)\le0$ implies $\mathbb{E}[L_{\hat\tau}]\le U(\hat\tau)\le0$,
+and by Eq.~\eqref{eq:linear},
+$\mathbb{E}[L_{\hat\tau}]\le0\iff\mathbb{E}[F_{\hat\tau}]
+\le\alpha\,\mathbb{E}[N_{\hat\tau}]\iff\mathcal{R}(\hat\tau)\le\alpha$.
+If no $\tau$ satisfies $U(\tau)\le0$ the procedure returns
+$\hat\tau=\infty$ and accepts nothing; then $F_{\hat\tau}=N_{\hat\tau}=0$
+and $\mathcal{R}=0\le\alpha$ by convention. In both cases
+$\Pr(\mathcal{R}(\hat\tau)>\alpha)\le\delta$, where the probability is
+over the draw of $\mathcal{D}_{\mathrm{cal}}$.
+
+\paragraph{What is and is not used.}
+No independence between claims of one instance is used: the i.i.d.\
+units are the instances, and $L_\tau(a)$ is a bounded function of the
+whole instance. The bound is marginal over calibration draws, not
+conditional on the realised calibration set, and relies on
+exchangeability of calibration and test instances. The Hoeffding variant
+replaces Step~1 by the distribution-free bound
+$r(\tau)=\sqrt{\ln(2|\mathcal{T}|/\delta)/(2n)}$ and otherwise follows
+identically; it is looser because it ignores the loss variance.
 
 \section{Additional Experimental Details}
 \label{app:details}
-\textbf{[Placeholder: prompts, annotation guidelines, hyperparameters, compute.]}
+
+\paragraph{Data protocol.}
+WiCE subclaim rows (3{,}470 train / 949 dev / 958 test) are pooled and
+re-split deterministically (seed 20240613, stratified by parent label
+mix) into P1-train (head training), a 10\% P1-val fold (early
+stopping), P2 (200 parents, aggregator/threshold tuning), and
+P3/P4 (calibration/test resplits of the pooled dev+test parents,
+707 parents / 1{,}907 subclaims, 1{,}000 resplits). Parent claims are
+the i.i.d.\ instance unit; subclaims of one parent never cross the
+calibration/test boundary. Strict binary correctness: only
+\emph{supported} gives $y{=}1$.
+
+\paragraph{Chunk-label derivation.}
+For each token-window sequence, evidence sentences are mapped to chunk
+spans $(a,b)$. With supporting-sentence index sets
+$\{S_1,\dots,S_A\}$ (one per annotator; WiCE states all are valid) and
+row label $y_{\mathrm{row}}$: a chunk gets \emph{not\_supported} if it
+contains no supporting sentence; \emph{supported} if
+$y_{\mathrm{row}}{=}0$ and it contains all of some $S_a$; otherwise
+\emph{partially\_supported}. Unit tests cover all four cases
+(\texttt{tests/test\_wice\_chunk\_labels.py}).
+
+\paragraph{Verifier.}
+Backbone Qwen/Qwen3.5-2B, last hidden layer only, hidden size 2048.
+Window: claim $+\,<\text{claim\_end}> +$ up to $\approx$6{,}144 tokens
+of chunks ($\le$128 tokens each, greedy sentence packing) $+$ readout
+$<\text{im\_end}>$. $hq$ = state at readout (global view); $he$ = state
+at each chunk end (causal: sees claim and earlier chunks only).
+Head: $z_k=\sum_{\rho=1}^{r}(h_q^\top U_{k,\rho})(h_e^\top
+V_{k,\rho})+b_k$, $r{=}256$, $K{=}3$. Training: 10 epochs, batch 512
+chunks, AdamW lr $10^{-3}$, wd 0.01, cosine, clip 1.0, class weights
+$\propto\text{freq}^{-1.0}$ normalized to mean 1. Checkpoint selected
+by P1-val row macro-F1.
+
+\paragraph{Calibration.}
+$|\mathcal{T}|{=}50$ fixed uniform thresholds on $(0,1]$;
+$m_{\max}{=}6$ (structural cap on subclaims per parent);
+$\delta{=}0.10$; bounds \{empirical Bernstein, Hoeffding\}
+$\times$ \{micro, macro\} loss modes. Scores $u_j$ are ClaimScore NPZ
+arrays; aggregation is NumPy-only.
+
+\paragraph{Compute.}
+Extraction and head training on Kaggle 2$\times$T4 (HF backend,
+fp16, $\approx$50 min for P1-train, $\approx$1h total pipeline);
+calibration/resplits/ablations on CPU. Seeds: split 20240613,
+training 0, resplit 0.
 
 \section{Additional Results}
 \label{app:results}
-\textbf{[Placeholder: extra tables and plots.]}
+
+\paragraph{Pending.}
+Full per-cell certification tables (all $n_{\mathrm{cal}}\times\alpha
+\times|\mathcal{T}|$ combinations), risk--coverage frontier data,
+head-rank ablation CSVs, and aggregation ablation CSVs are generated
+by \texttt{experiments/resplit\_runner.py},
+\texttt{experiments/export\_frontier.py},
+\texttt{experiments/head\_ablations.py}, and
+\texttt{experiments/aggregation\_ablations.py} and archived under
+\texttt{results/}; they populate the pending tables of
+Section~\ref{sec:results} once the corrected-label verifier run
+completes.
 
 \end{document}
