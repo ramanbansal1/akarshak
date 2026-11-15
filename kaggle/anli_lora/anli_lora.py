@@ -9,8 +9,13 @@ Prompt:  {hypothesis}<hypothesis-end> {premise}<premise-end> <answer>
 Loss:    3-class cross-entropy. Metric: accuracy per split.
 """
 
-import json, math, os, random, time
+import json, math, os, random, subprocess, sys, time
 from pathlib import Path
+
+# Kaggle ships torchao 0.10 which breaks peft's all-linear dispatch;
+# upgrade best-effort, then fall back to explicit module names below.
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "torchao"],
+               capture_output=True)
 
 import numpy as np
 import torch
@@ -59,7 +64,9 @@ base = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, dtype=torch.float16, attn_implementation="sdpa")
 base.gradient_checkpointing_enable()
 lora = LoraConfig(r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.05,
-                  target_modules="all-linear", bias="none", task_type="CAUSAL_LM")
+                  target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                                   "gate_proj", "up_proj", "down_proj"],
+                  bias="none", task_type="CAUSAL_LM")
 model = get_peft_model(base, lora)
 hidden = base.config.hidden_size
 head = nn.Linear(hidden, 3).to(dev, torch.float16)
