@@ -61,7 +61,8 @@ def encode(rows):
 # ------------------------------------------------------------- model
 print(f"loading {MODEL_ID} on {dev} ...", flush=True)
 base = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID, dtype=torch.float16, attn_implementation="sdpa")
+    MODEL_ID, dtype=torch.float16, attn_implementation="sdpa",
+    device_map=dev)
 base.gradient_checkpointing_enable()
 lora = LoraConfig(r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.05,
                   target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
